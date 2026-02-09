@@ -67,6 +67,16 @@ function initDB() {
       FOREIGN KEY (channel_id) REFERENCES channels(id),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS friendships (
+      id TEXT PRIMARY KEY,
+      sender_id TEXT NOT NULL,
+      receiver_id TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (sender_id) REFERENCES users(id),
+      FOREIGN KEY (receiver_id) REFERENCES users(id)
+    );
   `);
 
   console.log('Database initialized');

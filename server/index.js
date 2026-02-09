@@ -123,6 +123,91 @@ app.get('/api/servers/:serverId/members', authenticateToken, (req, res) => {
   res.json(members);
 });
 
+// --- Friend routes ---
+app.get('/api/friends', authenticateToken, (req, res) => {
+  const userId = req.user.id;
+  const friends = db().prepare(`
+    SELECT u.id, u.username, u.avatar_color, f.status, f.sender_id, f.receiver_id, f.id as friendship_id
+    FROM friendships f
+    JOIN users u ON (u.id = CASE WHEN f.sender_id = ? THEN f.receiver_id ELSE f.sender_id END)
+    WHERE (f.sender_id = ? OR f.receiver_id = ?) AND f.status = 'accepted'
+  `).all(userId, userId, userId);
+  res.json(friends);
+});
+
+app.get('/api/friends/pending', authenticateToken, (req, res) => {
+  const userId = req.user.id;
+  // Incoming requests
+  const incoming = db().prepare(`
+    SELECT u.id, u.username, u.avatar_color, f.id as friendship_id, 'incoming' as direction
+    FROM friendships f JOIN users u ON u.id = f.sender_id
+    WHERE f.receiver_id = ? AND f.status = 'pending'
+  `).all(userId);
+  // Outgoing requests
+  const outgoing = db().prepare(`
+    SELECT u.id, u.username, u.avatar_color, f.id as friendship_id, 'outgoing' as direction
+    FROM friendships f JOIN users u ON u.id = f.receiver_id
+    WHERE f.sender_id = ? AND f.status = 'pending'
+  `).all(userId);
+  res.json([...incoming, ...outgoing]);
+});
+
+app.post('/api/friends/request', authenticateToken, (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username required' });
+  const target = db().prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.id === req.user.id) return res.status(400).json({ error: "Can't add yourself" });
+
+  // Check existing friendship
+  const existing = db().prepare(`
+    SELECT * FROM friendships
+    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+  `).get(req.user.id, target.id, target.id, req.user.id);
+  if (existing) {
+    if (existing.status === 'accepted') return res.status(400).json({ error: 'Already friends' });
+    return res.status(400).json({ error: 'Request already pending' });
+  }
+
+  const { v4: uuidv4 } = require('uuid');
+  db().prepare('INSERT INTO friendships (id, sender_id, receiver_id, status) VALUES (?, ?, ?, ?)')
+    .run(uuidv4(), req.user.id, target.id, 'pending');
+
+  // Notify the target user via socket if online
+  const targetSocket = onlineUsers.get(target.id);
+  if (targetSocket) {
+    io.to(targetSocket).emit('friend-request-received', { from: req.user.id, username: req.user.username });
+  }
+
+  res.json({ success: true });
+});
+
+app.post('/api/friends/accept', authenticateToken, (req, res) => {
+  const { friendshipId } = req.body;
+  const f = db().prepare('SELECT * FROM friendships WHERE id = ? AND receiver_id = ? AND status = ?').get(friendshipId, req.user.id, 'pending');
+  if (!f) return res.status(404).json({ error: 'Request not found' });
+  db().prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', friendshipId);
+
+  // Notify sender
+  const senderSocket = onlineUsers.get(f.sender_id);
+  if (senderSocket) {
+    io.to(senderSocket).emit('friend-request-accepted', { by: req.user.id, username: req.user.username });
+  }
+
+  res.json({ success: true });
+});
+
+app.post('/api/friends/reject', authenticateToken, (req, res) => {
+  const { friendshipId } = req.body;
+  db().prepare('DELETE FROM friendships WHERE id = ? AND (receiver_id = ? OR sender_id = ?)').run(friendshipId, req.user.id, req.user.id);
+  res.json({ success: true });
+});
+
+app.delete('/api/friends/:friendshipId', authenticateToken, (req, res) => {
+  db().prepare('DELETE FROM friendships WHERE id = ? AND (sender_id = ? OR receiver_id = ?)').run(req.params.friendshipId, req.user.id, req.user.id);
+  res.json({ success: true });
+});
+
 // --- Profile route ---
 app.put('/api/profile', authenticateToken, (req, res) => {
   const { username, avatar_color } = req.body;
@@ -147,9 +232,24 @@ io.use((socket, next) => {
 
 // Track who's in voice channels
 const voiceState = new Map(); // channelId -> Set of { socketId, userId, username }
+// Track online users: userId -> socketId
+const onlineUsers = new Map();
 
 io.on('connection', (socket) => {
   console.log(`${socket.user.username} connected`);
+
+  // Track online status
+  onlineUsers.set(socket.user.id, socket.id);
+  // Broadcast online status to friends
+  broadcastOnlineStatus(socket.user.id, true);
+
+  // Get online friends
+  socket.on('get-online-users', (userIds, callback) => {
+    if (typeof callback === 'function') {
+      const online = userIds.filter(id => onlineUsers.has(id));
+      callback(online);
+    }
+  });
 
   // Join a server room
   socket.on('join-server', (serverId) => {
@@ -182,6 +282,8 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`${socket.user.username} disconnected`);
+    onlineUsers.delete(socket.user.id);
+    broadcastOnlineStatus(socket.user.id, false);
     // Remove from all voice channels
     for (const [channelId, users] of voiceState.entries()) {
       const user = [...users].find(u => u.socketId === socket.id);
@@ -197,6 +299,21 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+// Broadcast online/offline to a user's friends
+function broadcastOnlineStatus(userId, isOnline) {
+  const friends = db().prepare(`
+    SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END as friend_id
+    FROM friendships WHERE (sender_id = ? OR receiver_id = ?) AND status = 'accepted'
+  `).all(userId, userId, userId);
+
+  for (const { friend_id } of friends) {
+    const friendSocketId = onlineUsers.get(friend_id);
+    if (friendSocketId) {
+      io.to(friendSocketId).emit('friend-online-status', { userId, online: isOnline });
+    }
+  }
+}
 
 // Catch-all for SPA in production
 if (process.env.NODE_ENV === 'production') {

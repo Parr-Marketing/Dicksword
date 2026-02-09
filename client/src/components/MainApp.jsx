@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { VoiceManager } from '../utils/webrtc';
 import Settings from './Settings';
+import Friends from './Friends';
 
 const API = '/api';
 
@@ -45,6 +46,7 @@ export default function MainApp() {
   const [voiceChannelId, setVoiceChannelId] = useState(null);
   const [voiceUsers, setVoiceUsers] = useState([]);
   const [isMuted, setIsMuted] = useState(false);
+  const [isDeafened, setIsDeafened] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState(new Map());
   const [screenShareStream, setScreenShareStream] = useState(null); // local share
@@ -117,9 +119,9 @@ export default function MainApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Play remote audio streams + apply output volume and device
+  // Play remote audio streams + apply output volume, device, and deafen
   useEffect(() => {
-    const vol = voiceSettings.outputVolume / 100;
+    const vol = isDeafened ? 0 : voiceSettings.outputVolume / 100;
     for (const [socketId, stream] of remoteStreams) {
       if (!audioRefs.current[socketId]) {
         const audio = new Audio();
@@ -140,7 +142,7 @@ export default function MainApp() {
         delete audioRefs.current[socketId];
       }
     }
-  }, [remoteStreams, voiceSettings.outputVolume, voiceSettings.outputDevice]);
+  }, [remoteStreams, voiceSettings.outputVolume, voiceSettings.outputDevice, isDeafened]);
 
   // Push-to-talk
   useEffect(() => {
@@ -308,6 +310,7 @@ export default function MainApp() {
     setVoiceChannelId(null);
     setVoiceUsers([]);
     setIsMuted(false);
+    setIsDeafened(false);
     setIsScreenSharing(false);
     setScreenShareStream(null);
     setRemoteScreenShare(null);
@@ -321,6 +324,20 @@ export default function MainApp() {
     if (voiceManagerRef.current) {
       const muted = voiceManagerRef.current.toggleMute();
       setIsMuted(muted);
+    }
+  };
+
+  const toggleDeafen = () => {
+    const newDeafened = !isDeafened;
+    setIsDeafened(newDeafened);
+    // If deafening, also mute mic. If undeafening, unmute mic.
+    if (newDeafened && !isMuted && voiceManagerRef.current && !voiceSettings.pttEnabled) {
+      voiceManagerRef.current.toggleMute();
+      setIsMuted(true);
+    }
+    if (!newDeafened && isMuted && voiceManagerRef.current && !voiceSettings.pttEnabled) {
+      voiceManagerRef.current.toggleMute();
+      setIsMuted(false);
     }
   };
 
@@ -367,6 +384,13 @@ export default function MainApp() {
 
       {/* Server sidebar */}
       <div className="server-sidebar">
+        <div
+          className={`server-icon home-icon ${!activeServer ? 'active' : ''}`}
+          style={{ background: '#5865F2' }}
+          onClick={() => { setActiveServer(null); setActiveChannel(null); setMobileView('chat'); }}
+          title="Home"
+        >🗡️</div>
+        <div className="server-divider" />
         {servers.map(s => (
           <div
             key={s.id}
@@ -469,20 +493,38 @@ export default function MainApp() {
               <div className="username">{user.username}</div>
               <div className="status">Online</div>
             </div>
+            <button
+              className={`user-panel-btn ${isMuted ? 'active-red' : ''}`}
+              onClick={toggleMute}
+              title={isMuted ? 'Unmute' : 'Mute'}
+              disabled={!voiceChannelId}
+              style={!voiceChannelId ? { opacity: 0.3 } : {}}
+            >
+              {isMuted ? '🔇' : '🎤'}
+            </button>
+            <button
+              className={`user-panel-btn ${isDeafened ? 'active-red' : ''}`}
+              onClick={toggleDeafen}
+              title={isDeafened ? 'Undeafen' : 'Deafen'}
+              disabled={!voiceChannelId}
+              style={!voiceChannelId ? { opacity: 0.3 } : {}}
+            >
+              {isDeafened ? '🔕' : '🎧'}
+            </button>
             <button className="user-panel-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
-            <button className="user-panel-btn" onClick={() => setShowModal('invite')} title="Invite">📋</button>
-            <button className="user-panel-btn" onClick={logout} title="Log Out">🚪</button>
           </div>
         </div>
       ) : (
         <div className="channel-sidebar">
           <div className="channel-sidebar-header">Dicksword</div>
-          <div className="channel-list" style={{ padding: 16 }}>
-            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
-              Create a server or join one with an invite code.
-            </p>
-            <button className="btn-primary" style={{ marginBottom: 8 }} onClick={() => setShowModal('create')}>Create a Server</button>
-            <button className="btn-primary" style={{ background: 'var(--bg-tertiary)' }} onClick={() => setShowModal('join')}>Join a Server</button>
+          <div className="channel-list">
+            <div
+              className="channel-item active"
+              style={{ marginTop: 8 }}
+            >
+              <span className="channel-icon">👥</span>
+              <span className="channel-name">Friends</span>
+            </div>
           </div>
           <div className="user-panel">
             <div className="user-avatar" style={{ background: user.avatar_color }}>
@@ -491,8 +533,25 @@ export default function MainApp() {
             <div className="user-info">
               <div className="username">{user.username}</div>
             </div>
+            <button
+              className={`user-panel-btn ${isMuted ? 'active-red' : ''}`}
+              onClick={toggleMute}
+              title={isMuted ? 'Unmute' : 'Mute'}
+              disabled={!voiceChannelId}
+              style={!voiceChannelId ? { opacity: 0.3 } : {}}
+            >
+              {isMuted ? '🔇' : '🎤'}
+            </button>
+            <button
+              className={`user-panel-btn ${isDeafened ? 'active-red' : ''}`}
+              onClick={toggleDeafen}
+              title={isDeafened ? 'Undeafen' : 'Deafen'}
+              disabled={!voiceChannelId}
+              style={!voiceChannelId ? { opacity: 0.3 } : {}}
+            >
+              {isDeafened ? '🔕' : '🎧'}
+            </button>
             <button className="user-panel-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
-            <button className="user-panel-btn" onClick={logout} title="Log Out">🚪</button>
           </div>
         </div>
       )}
@@ -622,11 +681,13 @@ export default function MainApp() {
               </div>
             </>
           )
+        ) : !activeServer ? (
+          <Friends />
         ) : (
           <div className="empty-state">
             <div className="icon">🗡️</div>
-            <h2 style={{ color: 'var(--header-primary)' }}>Welcome to Dicksword</h2>
-            <p>Select a channel to start chatting</p>
+            <h2 style={{ color: 'var(--header-primary)' }}>Select a channel</h2>
+            <p>Pick a text or voice channel to get started</p>
           </div>
         )}
       </div>
