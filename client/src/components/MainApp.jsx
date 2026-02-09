@@ -46,7 +46,8 @@ export default function MainApp() {
   const [isMuted, setIsMuted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState(new Map());
-  const [screenShareStream, setScreenShareStream] = useState(null);
+  const [screenShareStream, setScreenShareStream] = useState(null); // local share
+  const [remoteScreenShare, setRemoteScreenShare] = useState(null); // { socketId, stream }
   const [voiceSettings, setVoiceSettings] = useState(loadVoiceSettings);
   const voiceManagerRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -256,6 +257,12 @@ export default function MainApp() {
         return next;
       });
     };
+    vm.onScreenShareReceived = (socketId, stream) => {
+      setRemoteScreenShare({ socketId, stream });
+    };
+    vm.onScreenShareStopped = () => {
+      setRemoteScreenShare(null);
+    };
 
     voiceManagerRef.current = vm;
     const success = await vm.joinVoice(channel.id, {
@@ -283,6 +290,8 @@ export default function MainApp() {
     setVoiceUsers([]);
     setIsMuted(false);
     setIsScreenSharing(false);
+    setScreenShareStream(null);
+    setRemoteScreenShare(null);
     setRemoteStreams(new Map());
     Object.values(audioRefs.current).forEach(a => a.pause());
     audioRefs.current = {};
@@ -296,18 +305,22 @@ export default function MainApp() {
     }
   };
 
-  const toggleScreenShare = async () => {
-    if (!voiceManagerRef.current) return;
-    if (isScreenSharing) {
+  const stopScreenShare = useCallback(() => {
+    if (voiceManagerRef.current) {
       voiceManagerRef.current.stopScreenShare();
-      setIsScreenSharing(false);
-      setScreenShareStream(null);
-    } else {
-      const stream = await voiceManagerRef.current.startScreenShare();
-      if (stream) {
-        setIsScreenSharing(true);
-        setScreenShareStream(stream);
-      }
+    }
+    setIsScreenSharing(false);
+    setScreenShareStream(null);
+  }, []);
+
+  const startScreenShare = async () => {
+    if (!voiceManagerRef.current) return;
+    const stream = await voiceManagerRef.current.startScreenShare();
+    if (stream) {
+      setIsScreenSharing(true);
+      setScreenShareStream(stream);
+      // Auto-stop when the browser's native "stop sharing" fires
+      stream.getVideoTracks()[0].onended = () => stopScreenShare();
     }
   };
 
@@ -521,13 +534,25 @@ export default function MainApp() {
                 <span className="channel-name">{activeChannel.name}</span>
               </div>
               <div className="voice-panel">
+                {/* Local screen share preview */}
                 {screenShareStream && (
                   <div className="screen-share-container">
                     <div className="screen-share-label">You are sharing your screen</div>
                     <video autoPlay muted ref={el => { if (el) el.srcObject = screenShareStream; }} />
+                    <button className="voice-btn disconnect" style={{ marginTop: 12 }} onClick={stopScreenShare}>
+                      ⏹️ Stop Sharing
+                    </button>
                   </div>
                 )}
-                {!screenShareStream && (
+                {/* Remote screen share */}
+                {!screenShareStream && remoteScreenShare && (
+                  <div className="screen-share-container">
+                    <div className="screen-share-label">Someone is sharing their screen</div>
+                    <video autoPlay ref={el => { if (el) el.srcObject = remoteScreenShare.stream; }} />
+                  </div>
+                )}
+                {/* Voice participants (shown when no screen share) */}
+                {!screenShareStream && !remoteScreenShare && (
                   <>
                     <h2>{activeChannel.name}</h2>
                     <div className="voice-participants">
@@ -547,6 +572,7 @@ export default function MainApp() {
                     </div>
                   </>
                 )}
+                {/* Voice controls - always visible */}
                 <div className="voice-controls">
                   {voiceChannelId === activeChannel.id ? (
                     <>
@@ -555,9 +581,15 @@ export default function MainApp() {
                           ? (isMuted ? '🔇 PTT Off' : '🎤 PTT On')
                           : (isMuted ? '🔇 Unmute' : '🎤 Mute')}
                       </button>
-                      <button className={`voice-btn screen-share ${isScreenSharing ? 'sharing' : ''}`} onClick={toggleScreenShare}>
-                        {isScreenSharing ? '⏹️ Stop Share' : '🖥️ Share Screen'}
-                      </button>
+                      {!isScreenSharing ? (
+                        <button className="voice-btn screen-share" onClick={startScreenShare}>
+                          🖥️ Share Screen
+                        </button>
+                      ) : (
+                        <button className="voice-btn screen-share sharing" onClick={stopScreenShare}>
+                          ⏹️ Stop Share
+                        </button>
+                      )}
                       <button className="voice-btn disconnect" onClick={leaveVoice}>
                         Disconnect
                       </button>

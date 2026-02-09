@@ -17,6 +17,8 @@ export class VoiceManager {
     this.channelId = null;
     this.onRemoteStream = null;
     this.onRemoteStreamRemoved = null;
+    this.onScreenShareReceived = null;
+    this.onScreenShareStopped = null;
     this.isMuted = false;
 
     // Audio processing
@@ -33,11 +35,21 @@ export class VoiceManager {
     });
 
     this.socket.on('voice-offer', async ({ from, offer }) => {
-      const peer = this._createPeer(from, false);
-      await peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      this.socket.emit('voice-answer', { to: from, answer });
+      let peer = this.peers.get(from);
+      if (peer) {
+        // Renegotiation on existing peer (e.g. screen share added/removed)
+        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        this.socket.emit('voice-answer', { to: from, answer });
+      } else {
+        // New peer
+        peer = this._createPeer(from, false);
+        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        this.socket.emit('voice-answer', { to: from, answer });
+      }
     });
 
     this.socket.on('voice-answer', async ({ from, answer }) => {
@@ -55,6 +67,13 @@ export class VoiceManager {
     });
 
     this.socket.on('voice-user-left', ({ userId }) => {});
+
+    // When a remote user stops screen sharing
+    this.socket.on('screen-share-stopped', ({ userId }) => {
+      if (this.onScreenShareStopped) {
+        this.onScreenShareStopped(userId);
+      }
+    });
   }
 
   _createPeer(socketId, isInitiator) {
@@ -72,6 +91,14 @@ export class VoiceManager {
       });
     }
 
+    // If we're currently screen sharing, also add the video track
+    if (this.screenStream) {
+      const videoTrack = this.screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        peer.addTrack(videoTrack, this.screenStream);
+      }
+    }
+
     peer.onicecandidate = (event) => {
       if (event.candidate) {
         this.socket.emit('voice-ice-candidate', { to: socketId, candidate: event.candidate });
@@ -79,8 +106,16 @@ export class VoiceManager {
     };
 
     peer.ontrack = (event) => {
-      if (this.onRemoteStream) {
-        this.onRemoteStream(socketId, event.streams[0]);
+      const track = event.track;
+      if (track.kind === 'video') {
+        // Video track = screen share
+        if (this.onScreenShareReceived) {
+          this.onScreenShareReceived(socketId, event.streams[0]);
+        }
+      } else if (track.kind === 'audio') {
+        if (this.onRemoteStream) {
+          this.onRemoteStream(socketId, event.streams[0]);
+        }
       }
     };
 
@@ -193,10 +228,12 @@ export class VoiceManager {
     try {
       this.screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: { cursor: 'always' },
-        audio: true
+        audio: false
       });
 
       const videoTrack = this.screenStream.getVideoTracks()[0];
+
+      // Add the video track to all existing peers and renegotiate
       for (const [socketId, peer] of this.peers) {
         peer.addTrack(videoTrack, this.screenStream);
         const offer = await peer.createOffer();
@@ -205,7 +242,11 @@ export class VoiceManager {
       }
 
       this.socket.emit('screen-share-start', { channelId: this.channelId });
-      videoTrack.onended = () => this.stopScreenShare();
+
+      // Auto-stop when user clicks browser's "Stop sharing" button
+      videoTrack.onended = () => {
+        this.stopScreenShare();
+      };
 
       return this.screenStream;
     } catch (err) {
@@ -216,6 +257,23 @@ export class VoiceManager {
 
   stopScreenShare() {
     if (this.screenStream) {
+      const videoTrack = this.screenStream.getVideoTracks()[0];
+
+      // Remove the video track from all peers and renegotiate
+      for (const [socketId, peer] of this.peers) {
+        const senders = peer.getSenders();
+        const videoSender = senders.find(s => s.track === videoTrack);
+        if (videoSender) {
+          peer.removeTrack(videoSender);
+          peer.createOffer()
+            .then(offer => peer.setLocalDescription(offer))
+            .then(() => {
+              this.socket.emit('voice-offer', { to: socketId, offer: peer.localDescription });
+            })
+            .catch(console.error);
+        }
+      }
+
       this.screenStream.getTracks().forEach(t => t.stop());
       this.screenStream = null;
       this.socket.emit('screen-share-stop', { channelId: this.channelId });
@@ -229,5 +287,6 @@ export class VoiceManager {
     this.socket.off('voice-answer');
     this.socket.off('voice-ice-candidate');
     this.socket.off('voice-user-left');
+    this.socket.off('screen-share-stopped');
   }
 }
