@@ -1620,6 +1620,233 @@ a {
   font-size: 14px;
 }
 
+/* Avatar images (used everywhere) */
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Message attachments */
+.message-attachment {
+  margin-top: 4px;
+  max-width: 400px;
+}
+
+.message-attachment img {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: max-height 0.3s;
+}
+
+.message-attachment img.expanded {
+  max-height: none;
+}
+
+.message-attachment video {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+}
+
+/* Attachment button in message input */
+.attachment-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px 4px 0;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.attachment-btn:hover {
+  color: var(--text-normal);
+}
+
+/* Profile modal */
+.profile-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+
+.profile-modal {
+  background: var(--bg-primary);
+  border-radius: 8px;
+  width: 340px;
+  max-width: 90vw;
+  overflow: hidden;
+  position: relative;
+}
+
+.profile-banner {
+  height: 120px;
+  position: relative;
+}
+
+.profile-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-avatar-large {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 6px solid var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 600;
+  color: white;
+  margin-top: -40px;
+  margin-left: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-avatar-large .avatar-img {
+  border-radius: 50%;
+}
+
+.profile-info {
+  padding: 12px 16px 20px;
+}
+
+.profile-username {
+  color: var(--header-primary);
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.profile-meta {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.profile-close-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.5);
+  border: none;
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-close-btn:hover {
+  background: rgba(0,0,0,0.7);
+}
+
+/* Profile upload zones in settings */
+.profile-upload-zone {
+  border-radius: 8px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: opacity 0.2s;
+}
+
+.profile-upload-zone:hover {
+  opacity: 0.8;
+}
+
+.profile-upload-zone.banner-zone {
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-hint {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  text-align: center;
+  background: rgba(0,0,0,0.3);
+  padding: 8px 16px;
+  border-radius: 4px;
+}
+
+.profile-upload-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.profile-upload-avatar:hover .upload-avatar-overlay {
+  opacity: 1;
+}
+
+/* Server banner at top of channel sidebar */
+.server-banner {
+  height: 80px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.server-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.server-customize-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.server-customize-btn:hover {
+  background: var(--bg-modifier-hover);
+  color: var(--text-normal);
+}
+
 /* Home icon in server sidebar */
 .server-icon.home-icon {
   font-size: 24px;

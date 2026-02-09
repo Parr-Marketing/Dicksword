@@ -3,12 +3,38 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { initDB, db } = require('./db');
 const { authRouter, authenticateToken, getUserFromToken } = require('./auth');
 const { setupSignaling } = require('./signaling');
 
 const app = express();
 const server = http.createServer(app);
+
+// Setup uploads directory
+const uploadsDir = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'uploads') : path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+// Multer config for chat media
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  }
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only images and videos are allowed'));
+    }
+  }
+});
 
 // In production, allow same-origin only. In dev, allow Vite dev server.
 const allowedOrigins = process.env.NODE_ENV === 'production'
@@ -27,7 +53,10 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
+
+// Serve uploaded files
+app.use('/uploads', express.static(uploadsDir));
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
@@ -46,7 +75,7 @@ app.use('/api/auth', authRouter);
 // --- Server (guild) routes ---
 app.get('/api/servers', authenticateToken, (req, res) => {
   const servers = db().prepare(`
-    SELECT s.*, sm.role FROM servers s
+    SELECT s.id, s.name, s.owner_id, s.invite_code, s.icon_color, s.icon_url, s.banner_url, s.created_at, sm.role FROM servers s
     JOIN server_members sm ON sm.server_id = s.id
     WHERE sm.user_id = ?
     ORDER BY s.created_at
@@ -105,7 +134,7 @@ app.post('/api/servers/:serverId/channels', authenticateToken, (req, res) => {
 // --- Message routes ---
 app.get('/api/channels/:channelId/messages', authenticateToken, (req, res) => {
   const messages = db().prepare(`
-    SELECT m.*, u.username, u.avatar_color FROM messages m
+    SELECT m.*, u.username, u.avatar_color, u.avatar_url FROM messages m
     JOIN users u ON u.id = m.user_id
     WHERE m.channel_id = ?
     ORDER BY m.created_at DESC LIMIT 50
@@ -116,7 +145,7 @@ app.get('/api/channels/:channelId/messages', authenticateToken, (req, res) => {
 // --- Members route ---
 app.get('/api/servers/:serverId/members', authenticateToken, (req, res) => {
   const members = db().prepare(`
-    SELECT u.id, u.username, u.avatar_color, sm.role FROM users u
+    SELECT u.id, u.username, u.avatar_color, u.avatar_url, sm.role FROM users u
     JOIN server_members sm ON sm.user_id = u.id
     WHERE sm.server_id = ?
   `).all(req.params.serverId);
@@ -127,7 +156,7 @@ app.get('/api/servers/:serverId/members', authenticateToken, (req, res) => {
 app.get('/api/friends', authenticateToken, (req, res) => {
   const userId = req.user.id;
   const friends = db().prepare(`
-    SELECT u.id, u.username, u.avatar_color, f.status, f.sender_id, f.receiver_id, f.id as friendship_id
+    SELECT u.id, u.username, u.avatar_color, u.avatar_url, f.status, f.sender_id, f.receiver_id, f.id as friendship_id
     FROM friendships f
     JOIN users u ON (u.id = CASE WHEN f.sender_id = ? THEN f.receiver_id ELSE f.sender_id END)
     WHERE (f.sender_id = ? OR f.receiver_id = ?) AND f.status = 'accepted'
@@ -139,13 +168,13 @@ app.get('/api/friends/pending', authenticateToken, (req, res) => {
   const userId = req.user.id;
   // Incoming requests
   const incoming = db().prepare(`
-    SELECT u.id, u.username, u.avatar_color, f.id as friendship_id, 'incoming' as direction
+    SELECT u.id, u.username, u.avatar_color, u.avatar_url, f.id as friendship_id, 'incoming' as direction
     FROM friendships f JOIN users u ON u.id = f.sender_id
     WHERE f.receiver_id = ? AND f.status = 'pending'
   `).all(userId);
   // Outgoing requests
   const outgoing = db().prepare(`
-    SELECT u.id, u.username, u.avatar_color, f.id as friendship_id, 'outgoing' as direction
+    SELECT u.id, u.username, u.avatar_color, u.avatar_url, f.id as friendship_id, 'outgoing' as direction
     FROM friendships f JOIN users u ON u.id = f.receiver_id
     WHERE f.sender_id = ? AND f.status = 'pending'
   `).all(userId);
@@ -234,17 +263,67 @@ app.get('/api/recently-seen', authenticateToken, (req, res) => {
   res.json(results);
 });
 
-// --- Profile route ---
+// --- Profile routes ---
 app.put('/api/profile', authenticateToken, (req, res) => {
-  const { username, avatar_color } = req.body;
+  const { username, avatar_color, avatar_url, banner_url } = req.body;
   if (username) {
     db().prepare('UPDATE users SET username = ? WHERE id = ?').run(username, req.user.id);
   }
   if (avatar_color) {
     db().prepare('UPDATE users SET avatar_color = ? WHERE id = ?').run(avatar_color, req.user.id);
   }
-  const user = db().prepare('SELECT id, username, email, avatar_color FROM users WHERE id = ?').get(req.user.id);
+  if (avatar_url !== undefined) {
+    // Validate size: ~100KB base64
+    if (avatar_url && avatar_url.length > 200000) {
+      return res.status(400).json({ error: 'Avatar too large (max 100KB)' });
+    }
+    db().prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatar_url || null, req.user.id);
+  }
+  if (banner_url !== undefined) {
+    // Validate size: ~300KB base64
+    if (banner_url && banner_url.length > 500000) {
+      return res.status(400).json({ error: 'Banner too large (max 300KB)' });
+    }
+    db().prepare('UPDATE users SET banner_url = ? WHERE id = ?').run(banner_url || null, req.user.id);
+  }
+  const user = db().prepare('SELECT id, username, email, avatar_color, avatar_url, banner_url FROM users WHERE id = ?').get(req.user.id);
   res.json(user);
+});
+
+// Get user profile
+app.get('/api/users/:userId/profile', authenticateToken, (req, res) => {
+  const user = db().prepare('SELECT id, username, avatar_color, avatar_url, banner_url, created_at FROM users WHERE id = ?').get(req.params.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json(user);
+});
+
+// Upload chat media
+app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const mime = req.file.mimetype;
+  let type = 'image';
+  if (mime === 'image/gif') type = 'gif';
+  else if (mime.startsWith('video/')) type = 'video';
+  res.json({ url: `/uploads/${req.file.filename}`, type });
+});
+
+// Server customization
+app.put('/api/servers/:serverId/customize', authenticateToken, (req, res) => {
+  const server = db().prepare('SELECT * FROM servers WHERE id = ?').get(req.params.serverId);
+  if (!server) return res.status(404).json({ error: 'Server not found' });
+  if (server.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can customize' });
+
+  const { icon_url, banner_url } = req.body;
+  if (icon_url !== undefined) {
+    if (icon_url && icon_url.length > 200000) return res.status(400).json({ error: 'Icon too large (max 100KB)' });
+    db().prepare('UPDATE servers SET icon_url = ? WHERE id = ?').run(icon_url || null, req.params.serverId);
+  }
+  if (banner_url !== undefined) {
+    if (banner_url && banner_url.length > 500000) return res.status(400).json({ error: 'Banner too large (max 300KB)' });
+    db().prepare('UPDATE servers SET banner_url = ? WHERE id = ?').run(banner_url || null, req.params.serverId);
+  }
+  const updated = db().prepare('SELECT * FROM servers WHERE id = ?').get(req.params.serverId);
+  res.json(updated);
 });
 
 // Socket.IO authentication and real-time
@@ -306,12 +385,12 @@ io.on('connection', (socket) => {
   });
 
   // Send a message
-  socket.on('send-message', ({ channelId, content }) => {
+  socket.on('send-message', ({ channelId, content, attachmentUrl, attachmentType }) => {
     const { v4: uuidv4 } = require('uuid');
     const id = uuidv4();
-    db().prepare('INSERT INTO messages (id, channel_id, user_id, content) VALUES (?, ?, ?, ?)').run(id, channelId, socket.user.id, content);
+    db().prepare('INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_type) VALUES (?, ?, ?, ?, ?, ?)').run(id, channelId, socket.user.id, content || '', attachmentUrl || null, attachmentType || null);
     const message = db().prepare(`
-      SELECT m.*, u.username, u.avatar_color FROM messages m
+      SELECT m.*, u.username, u.avatar_color, u.avatar_url FROM messages m
       JOIN users u ON u.id = m.user_id WHERE m.id = ?
     `).get(id);
     io.to(`channel:${channelId}`).emit('new-message', message);

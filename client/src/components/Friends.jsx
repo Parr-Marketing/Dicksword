@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
+import ProfileCard from './ProfileCard';
 
 const API = '/api';
 
@@ -15,6 +16,7 @@ export default function Friends({ onBack }) {
   const [addInput, setAddInput] = useState('');
   const [addMsg, setAddMsg] = useState({ text: '', ok: false });
   const [search, setSearch] = useState('');
+  const [selectedProfileUserId, setSelectedProfileUserId] = useState(null);
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -178,9 +180,9 @@ export default function Friends({ onBack }) {
               <>
                 <div className="friends-list-header">Incoming — {incomingPending.length}</div>
                 {incomingPending.map(p => (
-                  <div key={p.friendship_id} className="friend-item">
+                  <div key={p.friendship_id} className="friend-item" onClick={() => setSelectedProfileUserId(p.id)}>
                     <div className="friend-avatar" style={{ background: p.avatar_color || '#5865F2' }}>
-                      {getInitials(p.username)}
+                      {p.avatar_url ? <img src={p.avatar_url} className="avatar-img" alt="" /> : getInitials(p.username)}
                     </div>
                     <div className="friend-info">
                       <span className="friend-name">{p.username}</span>
@@ -198,9 +200,9 @@ export default function Friends({ onBack }) {
               <>
                 <div className="friends-list-header">Outgoing — {outgoingPending.length}</div>
                 {outgoingPending.map(p => (
-                  <div key={p.friendship_id} className="friend-item">
+                  <div key={p.friendship_id} className="friend-item" onClick={() => setSelectedProfileUserId(p.id)}>
                     <div className="friend-avatar" style={{ background: p.avatar_color || '#5865F2' }}>
-                      {getInitials(p.username)}
+                      {p.avatar_url ? <img src={p.avatar_url} className="avatar-img" alt="" /> : getInitials(p.username)}
                     </div>
                     <div className="friend-info">
                       <span className="friend-name">{p.username}</span>
@@ -265,10 +267,10 @@ export default function Friends({ onBack }) {
               {tab === 'online' ? `Online — ${onlineFriends.length}` : `All Friends — ${friends.length}`}
             </div>
             {filteredFriends.map(f => (
-              <div key={f.friendship_id} className="friend-item">
+              <div key={f.friendship_id} className="friend-item" onClick={() => setSelectedProfileUserId(f.id)}>
                 <div className="friend-avatar-wrapper">
                   <div className="friend-avatar" style={{ background: f.avatar_color || '#5865F2' }}>
-                    {getInitials(f.username)}
+                    {f.avatar_url ? <img src={f.avatar_url} className="avatar-img" alt="" /> : getInitials(f.username)}
                   </div>
                   <span className={`friend-online-dot ${onlineIds.has(f.id) ? 'online' : 'offline'}`} />
                 </div>
@@ -289,6 +291,10 @@ export default function Friends({ onBack }) {
           </>
         )}
       </div>
+
+      {selectedProfileUserId && (
+        <ProfileCard userId={selectedProfileUserId} onClose={() => setSelectedProfileUserId(null)} />
+      )}
     </div>
   );
 }

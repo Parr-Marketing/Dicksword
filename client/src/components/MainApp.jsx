@@ -4,6 +4,8 @@ import { useSocket } from '../context/SocketContext';
 import { VoiceManager } from '../utils/webrtc';
 import Settings from './Settings';
 import Friends from './Friends';
+import ProfileCard from './ProfileCard';
+import { compressServerIcon, compressServerBanner } from '../utils/imageCompression';
 
 const API = '/api';
 
@@ -63,6 +65,11 @@ export default function MainApp() {
   });
   const [userMuted, setUserMuted] = useState(new Set());
   const [friendRequestsSent, setFriendRequestsSent] = useState(new Set());
+  const [selectedProfileUserId, setSelectedProfileUserId] = useState(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const attachmentInputRef = useRef(null);
+  const serverIconInputRef = useRef(null);
+  const serverBannerInputRef = useRef(null);
   const voiceManagerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const audioRefs = useRef({}); // socketId -> { audio, ctx?, gain? }
@@ -93,6 +100,77 @@ export default function MainApp() {
         setFriendRequestsSent(prev => new Set(prev).add(username));
       }
     } catch {}
+  };
+
+  // Upload chat attachment
+  const handleAttachmentSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !socket || !activeChannel) return;
+    setAttachmentUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API}/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+      if (res.ok) {
+        const { url, type } = await res.json();
+        socket.emit('send-message', {
+          channelId: activeChannel.id,
+          content: messageInput.trim() || '',
+          attachmentUrl: url,
+          attachmentType: type
+        });
+        setMessageInput('');
+      }
+    } catch (err) {
+      console.error('Upload failed:', err);
+    }
+    setAttachmentUploading(false);
+    if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+  };
+
+  // Server customization
+  const handleServerIconSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeServer) return;
+    try {
+      const dataUrl = await compressServerIcon(file);
+      const res = await fetch(`${API}/servers/${activeServer.id}/customize`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ icon_url: dataUrl })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setServers(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+        setActiveServer(prev => prev ? { ...prev, ...updated } : prev);
+      }
+    } catch (err) {
+      console.error('Server icon upload failed:', err);
+    }
+  };
+
+  const handleServerBannerSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeServer) return;
+    try {
+      const dataUrl = await compressServerBanner(file);
+      const res = await fetch(`${API}/servers/${activeServer.id}/customize`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ banner_url: dataUrl })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setServers(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+        setActiveServer(prev => prev ? { ...prev, ...updated } : prev);
+      }
+    } catch (err) {
+      console.error('Server banner upload failed:', err);
+    }
   };
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -484,7 +562,7 @@ export default function MainApp() {
             onClick={() => { setActiveServer(s); setActiveChannel(null); }}
             title={s.name}
           >
-            {getInitials(s.name)}
+            {s.icon_url ? <img src={s.icon_url} className="avatar-img" alt={s.name} /> : getInitials(s.name)}
           </div>
         ))}
         <div className="server-divider" />
@@ -495,7 +573,17 @@ export default function MainApp() {
       {/* Channel sidebar */}
       {activeServer ? (
         <div className="channel-sidebar">
-          <div className="channel-sidebar-header">{activeServer.name}</div>
+          {activeServer.banner_url && (
+            <div className="server-banner">
+              <img src={activeServer.banner_url} alt="Server banner" />
+            </div>
+          )}
+          <div className="channel-sidebar-header">
+            <span style={{ flex: 1 }}>{activeServer.name}</span>
+            {activeServer.owner_id === user.id && (
+              <button className="server-customize-btn" onClick={() => setShowModal('serverCustomize')} title="Customize Server">⚙️</button>
+            )}
+          </div>
           <div className="channel-list">
             {textChannels.length > 0 && (
               <>
@@ -571,8 +659,8 @@ export default function MainApp() {
 
           {/* User panel */}
           <div className="user-panel">
-            <div className="user-avatar" style={{ background: user.avatar_color }}>
-              {getInitials(user.username)}
+            <div className="user-avatar" style={{ background: user.avatar_color }} onClick={() => setSelectedProfileUserId(user.id)}>
+              {user.avatar_url ? <img src={user.avatar_url} className="avatar-img" alt="" /> : getInitials(user.username)}
             </div>
             <div className="user-info">
               <div className="username">{user.username}</div>
@@ -612,8 +700,8 @@ export default function MainApp() {
             </div>
           </div>
           <div className="user-panel">
-            <div className="user-avatar" style={{ background: user.avatar_color }}>
-              {getInitials(user.username)}
+            <div className="user-avatar" style={{ background: user.avatar_color }} onClick={() => setSelectedProfileUserId(user.id)}>
+              {user.avatar_url ? <img src={user.avatar_url} className="avatar-img" alt="" /> : getInitials(user.username)}
             </div>
             <div className="user-info">
               <div className="username">{user.username}</div>
@@ -658,8 +746,8 @@ export default function MainApp() {
                   return (
                     <div key={msg.id} className={`message ${showHeader ? 'has-header' : ''}`}>
                       {showHeader ? (
-                        <div className="message-avatar" style={{ background: msg.avatar_color || '#5865F2' }}>
-                          {getInitials(msg.username)}
+                        <div className="message-avatar" style={{ background: msg.avatar_color || '#5865F2' }} onClick={() => setSelectedProfileUserId(msg.user_id)}>
+                          {msg.avatar_url ? <img src={msg.avatar_url} className="avatar-img" alt="" /> : getInitials(msg.username)}
                         </div>
                       ) : (
                         <div style={{ width: 40 }} />
@@ -667,11 +755,21 @@ export default function MainApp() {
                       <div className="message-content">
                         {showHeader && (
                           <div className="message-header">
-                            <span className="message-author">{msg.username}</span>
+                            <span className="message-author" onClick={() => setSelectedProfileUserId(msg.user_id)} style={{ cursor: 'pointer' }}>{msg.username}</span>
                             <span className="message-timestamp">{formatTime(msg.created_at)}</span>
                           </div>
                         )}
-                        <div className="message-text">{msg.content}</div>
+                        {msg.content && <div className="message-text">{msg.content}</div>}
+                        {msg.attachment_url && (
+                          <div className="message-attachment">
+                            {(msg.attachment_type === 'image' || msg.attachment_type === 'gif') && (
+                              <img src={msg.attachment_url} alt="attachment" onClick={(e) => { e.target.classList.toggle('expanded'); }} />
+                            )}
+                            {msg.attachment_type === 'video' && (
+                              <video controls preload="metadata" src={msg.attachment_url} />
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -680,12 +778,16 @@ export default function MainApp() {
               </div>
               <div className="message-input-container">
                 <form onSubmit={sendMessage} className="message-input-wrapper">
+                  <button type="button" className="attachment-btn" onClick={() => attachmentInputRef.current?.click()} disabled={attachmentUploading} title="Upload file">
+                    {attachmentUploading ? '⏳' : '📎'}
+                  </button>
                   <input
                     className="message-input"
                     placeholder={`Message #${activeChannel.name}`}
                     value={messageInput}
                     onChange={e => setMessageInput(e.target.value)}
                   />
+                  <input ref={attachmentInputRef} type="file" accept="image/*,video/*,.gif" onChange={handleAttachmentSelect} style={{ display: 'none' }} />
                 </form>
               </div>
             </>
@@ -822,9 +924,9 @@ export default function MainApp() {
         <div className="members-sidebar">
           <div className="members-category">Members — {members.length}</div>
           {members.map(m => (
-            <div key={m.id} className="member-item">
+            <div key={m.id} className="member-item" onClick={() => setSelectedProfileUserId(m.id)}>
               <div className="member-avatar" style={{ background: m.avatar_color || '#5865F2' }}>
-                {getInitials(m.username)}
+                {m.avatar_url ? <img src={m.avatar_url} className="avatar-img" alt="" /> : getInitials(m.username)}
               </div>
               <span className="member-name">{m.username}</span>
             </div>
@@ -869,6 +971,39 @@ export default function MainApp() {
                 </div>
               </>
             )}
+            {showModal === 'serverCustomize' && activeServer && (
+              <>
+                <h2>Customize Server</h2>
+                <div className="settings-field">
+                  <label>Server Icon (128×128, max 100KB)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <div className="server-icon" style={{ background: activeServer.icon_color || '#5865F2', width: 64, height: 64, fontSize: 28, cursor: 'pointer' }} onClick={() => serverIconInputRef.current?.click()}>
+                      {activeServer.icon_url ? <img src={activeServer.icon_url} className="avatar-img" alt="" /> : getInitials(activeServer.name)}
+                    </div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Click to change</span>
+                  </div>
+                  <input ref={serverIconInputRef} type="file" accept="image/*" onChange={handleServerIconSelect} style={{ display: 'none' }} />
+                </div>
+                <div className="settings-field">
+                  <label>Server Banner (600×240, max 300KB)</label>
+                  <div
+                    className="profile-upload-zone banner-zone"
+                    onClick={() => serverBannerInputRef.current?.click()}
+                    style={
+                      activeServer.banner_url
+                        ? { backgroundImage: `url(${activeServer.banner_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                        : { background: `linear-gradient(135deg, ${activeServer.icon_color || '#5865F2'}, #2b2d31)` }
+                    }
+                  >
+                    {!activeServer.banner_url && <span className="upload-hint">Click to upload banner</span>}
+                  </div>
+                  <input ref={serverBannerInputRef} type="file" accept="image/*" onChange={handleServerBannerSelect} style={{ display: 'none' }} />
+                </div>
+                <div className="modal-buttons">
+                  <button className="btn-submit" onClick={() => setShowModal(null)}>Done</button>
+                </div>
+              </>
+            )}
             {showModal === 'addChannel' && (
               <>
                 <h2>Create Channel</h2>
@@ -887,6 +1022,11 @@ export default function MainApp() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Profile Card */}
+      {selectedProfileUserId && (
+        <ProfileCard userId={selectedProfileUserId} onClose={() => setSelectedProfileUserId(null)} />
       )}
     </div>
   );

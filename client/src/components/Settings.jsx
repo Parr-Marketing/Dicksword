@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { compressAvatar, compressBanner } from '../utils/imageCompression';
 
 const API = '/api';
 const MAX_LISTENBACK_SECS = 10;
@@ -12,6 +13,15 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
   const [username, setUsername] = useState(user?.username || '');
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+
+  // Profile image state
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || null);
+  const [bannerUrl, setBannerUrl] = useState(user?.banner_url || null);
+  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [bannerPreview, setBannerPreview] = useState(null);
+  const [profileSaveMsg, setProfileSaveMsg] = useState('');
+  const avatarInputRef = useRef(null);
+  const bannerInputRef = useRef(null);
 
   // Audio device state
   const [inputDevices, setInputDevices] = useState([]);
@@ -299,6 +309,93 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
     setTimeout(() => setSaveMsg(''), 2000);
   };
 
+  // Profile image handlers
+  const handleAvatarSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressAvatar(file);
+      setAvatarPreview(dataUrl);
+    } catch (err) {
+      setProfileSaveMsg(err.message);
+      setTimeout(() => setProfileSaveMsg(''), 3000);
+    }
+  };
+
+  const handleBannerSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressBanner(file);
+      setBannerPreview(dataUrl);
+    } catch (err) {
+      setProfileSaveMsg(err.message);
+      setTimeout(() => setProfileSaveMsg(''), 3000);
+    }
+  };
+
+  const saveProfile = async () => {
+    setSaving(true);
+    setProfileSaveMsg('');
+    try {
+      const body = {};
+      if (avatarPreview !== null) body.avatar_url = avatarPreview;
+      if (bannerPreview !== null) body.banner_url = bannerPreview;
+      if (Object.keys(body).length === 0) {
+        setSaving(false);
+        return;
+      }
+      const res = await fetch(`${API}/profile`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAvatarUrl(data.avatar_url);
+        setBannerUrl(data.banner_url);
+        setAvatarPreview(null);
+        setBannerPreview(null);
+        setProfileSaveMsg('Saved!');
+      } else {
+        const data = await res.json();
+        setProfileSaveMsg(data.error || 'Failed');
+      }
+    } catch {
+      setProfileSaveMsg('Failed to save');
+    }
+    setSaving(false);
+    setTimeout(() => setProfileSaveMsg(''), 3000);
+  };
+
+  const removeAvatar = async () => {
+    const res = await fetch(`${API}/profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ avatar_url: '' })
+    });
+    if (res.ok) {
+      setAvatarUrl(null);
+      setAvatarPreview(null);
+      setProfileSaveMsg('Avatar removed');
+      setTimeout(() => setProfileSaveMsg(''), 2000);
+    }
+  };
+
+  const removeBanner = async () => {
+    const res = await fetch(`${API}/profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ banner_url: '' })
+    });
+    if (res.ok) {
+      setBannerUrl(null);
+      setBannerPreview(null);
+      setProfileSaveMsg('Banner removed');
+      setTimeout(() => setProfileSaveMsg(''), 2000);
+    }
+  };
+
   // Key listener for PTT or mute key binding
   useEffect(() => {
     if (!listeningForKey) return;
@@ -328,6 +425,7 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
 
   const tabs = [
     { id: 'account', label: 'My Account' },
+    { id: 'profile', label: 'Profile' },
     { id: 'voice', label: 'Voice & Audio' },
   ];
 
@@ -385,6 +483,72 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'profile' && (
+            <div className="settings-section">
+              <h2>Profile</h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 20 }}>
+                Customize how others see you. Avatar and banner are visible on your profile card.
+              </p>
+
+              {/* Banner upload */}
+              <div className="settings-field">
+                <label>Banner</label>
+                <div
+                  className="profile-upload-zone banner-zone"
+                  onClick={() => bannerInputRef.current?.click()}
+                  style={
+                    (bannerPreview || bannerUrl)
+                      ? { backgroundImage: `url(${bannerPreview || bannerUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                      : { background: `linear-gradient(135deg, ${user.avatar_color || '#5865F2'}, #2b2d31)` }
+                  }
+                >
+                  {!bannerPreview && !bannerUrl && <span className="upload-hint">Click to upload banner (600×240, max 300KB)</span>}
+                </div>
+                <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelect} style={{ display: 'none' }} />
+                {(bannerPreview || bannerUrl) && (
+                  <button className="btn-submit" style={{ background: 'var(--red)', marginTop: 8, fontSize: 12, padding: '4px 12px' }} onClick={removeBanner}>Remove Banner</button>
+                )}
+              </div>
+
+              {/* Avatar upload */}
+              <div className="settings-field">
+                <label>Avatar</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div
+                    className="profile-upload-avatar"
+                    onClick={() => avatarInputRef.current?.click()}
+                    style={{ background: user.avatar_color || '#5865F2' }}
+                  >
+                    {(avatarPreview || avatarUrl)
+                      ? <img src={avatarPreview || avatarUrl} className="avatar-img" alt="Avatar" />
+                      : <span>{user.username?.charAt(0).toUpperCase()}</span>
+                    }
+                    <div className="upload-avatar-overlay">Edit</div>
+                  </div>
+                  <div>
+                    <p style={{ color: 'var(--text-normal)', fontSize: 14 }}>Click avatar to change</p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>128×128, max 100KB</p>
+                  </div>
+                </div>
+                <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} style={{ display: 'none' }} />
+                {(avatarPreview || avatarUrl) && (
+                  <button className="btn-submit" style={{ background: 'var(--red)', marginTop: 8, fontSize: 12, padding: '4px 12px' }} onClick={removeAvatar}>Remove Avatar</button>
+                )}
+              </div>
+
+              <div className="settings-actions">
+                {profileSaveMsg && <span style={{ color: profileSaveMsg === 'Saved!' ? 'var(--green)' : 'var(--red)', fontSize: 14 }}>{profileSaveMsg}</span>}
+                <button
+                  className="btn-submit"
+                  onClick={saveProfile}
+                  disabled={saving || (!avatarPreview && !bannerPreview)}
+                >
+                  {saving ? 'Saving...' : 'Save Profile'}
+                </button>
               </div>
             </div>
           )}

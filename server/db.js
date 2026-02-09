@@ -79,6 +79,24 @@ function initDB() {
     );
   `);
 
+  // Migrations: add new columns safely
+  const migrations = [
+    { table: 'users', column: 'avatar_url', type: 'TEXT' },
+    { table: 'users', column: 'banner_url', type: 'TEXT' },
+    { table: 'servers', column: 'icon_url', type: 'TEXT' },
+    { table: 'servers', column: 'banner_url', type: 'TEXT' },
+    { table: 'messages', column: 'attachment_url', type: 'TEXT' },
+    { table: 'messages', column: 'attachment_type', type: 'TEXT' },
+  ];
+
+  for (const m of migrations) {
+    try {
+      d.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.column} ${m.type}`);
+    } catch (e) {
+      // Column already exists, ignore
+    }
+  }
+
   console.log('Database initialized');
 }
 
