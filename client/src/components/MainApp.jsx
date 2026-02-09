@@ -253,7 +253,8 @@ export default function MainApp() {
           </div>
         ))}
         <div className="server-divider" />
-        <button className="add-server-btn" onClick={() => setShowModal('create')} title="Add a Server">+</button>
+        <button className="add-server-btn" onClick={() => setShowModal('create')} title="Create a Server">+</button>
+        <button className="add-server-btn" onClick={() => setShowModal('join')} title="Join a Server" style={{ color: '#5865F2', fontSize: '20px' }}>↓</button>
       </div>
 
       {/* Channel sidebar */}

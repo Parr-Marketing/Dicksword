@@ -3,7 +3,7 @@ const path = require('path');
 
 // The URL of your deployed Dicksword server
 // Change this to your Railway URL after deploying
-const SERVER_URL = process.env.DICKSWORD_URL || 'http://localhost:3001';
+const SERVER_URL = process.env.DICKSWORD_URL || 'https://dicksword-production.up.railway.app';
 
 let mainWindow;
 
