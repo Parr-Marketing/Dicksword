@@ -38,6 +38,7 @@ export default function MainApp() {
   const [modalInput, setModalInput] = useState('');
   const [modalType, setModalType] = useState('text');
   const [showSettings, setShowSettings] = useState(false);
+  const [mobileView, setMobileView] = useState('channels'); // 'channels' or 'chat'
 
   // Voice state
   const [voiceChannelId, setVoiceChannelId] = useState(null);
@@ -322,7 +323,7 @@ export default function MainApp() {
   const activeVoiceChannel = channels.find(c => c.id === voiceChannelId);
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${mobileView === 'chat' ? 'mobile-chat-view' : 'mobile-channels-view'}`}>
       {/* Settings overlay */}
       {showSettings && (
         <Settings
@@ -362,7 +363,7 @@ export default function MainApp() {
                   <div
                     key={c.id}
                     className={`channel-item ${activeChannel?.id === c.id && activeChannel.type === 'text' ? 'active' : ''}`}
-                    onClick={() => setActiveChannel(c)}
+                    onClick={() => { setActiveChannel(c); setMobileView('chat'); }}
                   >
                     <span className="channel-icon">#</span>
                     <span className="channel-name">{c.name}</span>
@@ -379,6 +380,7 @@ export default function MainApp() {
                       className={`channel-item ${activeChannel?.id === c.id && activeChannel.type === 'voice' ? 'active' : ''}`}
                       onClick={() => {
                         setActiveChannel(c);
+                        setMobileView('chat');
                         if (voiceChannelId !== c.id) joinVoice(c);
                       }}
                     >
@@ -469,6 +471,7 @@ export default function MainApp() {
           activeChannel.type === 'text' ? (
             <>
               <div className="main-header">
+                <button className="mobile-back-btn" onClick={() => setMobileView('channels')}>←</button>
                 <span className="channel-hash">#</span>
                 <span className="channel-name">{activeChannel.name}</span>
               </div>
@@ -513,6 +516,7 @@ export default function MainApp() {
           ) : (
             <>
               <div className="main-header">
+                <button className="mobile-back-btn" onClick={() => setMobileView('channels')}>←</button>
                 <span className="channel-hash">🔊</span>
                 <span className="channel-name">{activeChannel.name}</span>
               </div>

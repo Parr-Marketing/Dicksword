@@ -2,7 +2,8 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm install && cd client && npm install && npx vite build"
+    "installCommand": "npm install && cd client && npm install",
+    "buildCommand": "cd client && npx vite build"
   },
   "deploy": {
     "startCommand": "NODE_ENV=production node server/index.js",
@@ -11,3 +12,4 @@
     "restartPolicyMaxRetries": 10
   }
 }
+
