@@ -151,9 +151,12 @@ export class VoiceManager {
   async joinVoice(channelId, options = {}) {
     try {
       const constraints = {
-        audio: options.inputDevice
-          ? { deviceId: { exact: options.inputDevice } }
-          : true,
+        audio: {
+          ...(options.inputDevice ? { deviceId: { exact: options.inputDevice } } : {}),
+          noiseSuppression: options.noiseSuppression !== false,
+          echoCancellation: options.echoCancellation !== false,
+          autoGainControl: options.autoGainControl !== false,
+        },
         video: false
       };
 

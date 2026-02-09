@@ -25,6 +25,9 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
   const [pttEnabled, setPttEnabled] = useState(voiceSettings.pttEnabled);
   const [pttKey, setPttKey] = useState(voiceSettings.pttKey);
   const [muteKey, setMuteKey] = useState(voiceSettings.muteKey || '');
+  const [noiseSuppression, setNoiseSuppression] = useState(voiceSettings.noiseSuppression !== false);
+  const [echoCancellation, setEchoCancellation] = useState(voiceSettings.echoCancellation !== false);
+  const [autoGainControl, setAutoGainControl] = useState(voiceSettings.autoGainControl !== false);
   const [listeningForKey, setListeningForKey] = useState(null); // 'ptt' | 'mute' | null
 
   // Mic test
@@ -289,7 +292,7 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
 
   // Save voice settings
   const saveVoiceSettings = () => {
-    const newSettings = { inputDevice, outputDevice, inputVolume, outputVolume, pttEnabled, pttKey, muteKey };
+    const newSettings = { inputDevice, outputDevice, inputVolume, outputVolume, pttEnabled, pttKey, muteKey, noiseSuppression, echoCancellation, autoGainControl };
     onVoiceSettingsChange(newSettings);
     localStorage.setItem('dicksword-voice-settings', JSON.stringify(newSettings));
     setSaveMsg('Saved!');
@@ -560,6 +563,36 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
                 <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
                   Press this key to toggle mute/unmute
                 </p>
+              </div>
+
+              <div className="settings-divider" />
+
+              {/* Audio Processing */}
+              <div className="settings-field">
+                <label>Audio Processing</label>
+                <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>
+                  These reduce background noise and improve voice quality. Changes apply next time you join voice.
+                </p>
+                <div className="settings-toggle-group">
+                  <div className="settings-toggle-row" onClick={() => setNoiseSuppression(!noiseSuppression)}>
+                    <span>Noise Suppression</span>
+                    <div className={`settings-toggle ${noiseSuppression ? 'on' : ''}`}>
+                      <div className="settings-toggle-knob" />
+                    </div>
+                  </div>
+                  <div className="settings-toggle-row" onClick={() => setEchoCancellation(!echoCancellation)}>
+                    <span>Echo Cancellation</span>
+                    <div className={`settings-toggle ${echoCancellation ? 'on' : ''}`}>
+                      <div className="settings-toggle-knob" />
+                    </div>
+                  </div>
+                  <div className="settings-toggle-row" onClick={() => setAutoGainControl(!autoGainControl)}>
+                    <span>Auto Gain Control</span>
+                    <div className={`settings-toggle ${autoGainControl ? 'on' : ''}`}>
+                      <div className="settings-toggle-knob" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="settings-actions" style={{ marginTop: 24 }}>

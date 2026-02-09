@@ -15,6 +15,9 @@ const DEFAULT_VOICE_SETTINGS = {
   pttEnabled: false,
   pttKey: 'Space',
   muteKey: '',
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
 };
 
 function loadVoiceSettings() {
@@ -364,6 +367,9 @@ export default function MainApp() {
     const success = await vm.joinVoice(channel.id, {
       inputDevice: voiceSettings.inputDevice,
       inputVolume: voiceSettings.inputVolume,
+      noiseSuppression: voiceSettings.noiseSuppression,
+      echoCancellation: voiceSettings.echoCancellation,
+      autoGainControl: voiceSettings.autoGainControl,
     });
     if (success) {
       setVoiceChannelId(channel.id);
