@@ -10,22 +10,25 @@ const ICE_SERVERS = {
 export class VoiceManager {
   constructor(socket) {
     this.socket = socket;
-    this.peers = new Map(); // socketId -> RTCPeerConnection
+    this.peers = new Map();
     this.localStream = null;
+    this.processedStream = null;
     this.screenStream = null;
     this.channelId = null;
-    this.onRemoteStream = null; // callback(socketId, stream)
+    this.onRemoteStream = null;
     this.onRemoteStreamRemoved = null;
-    this.onScreenStream = null;
-    this.onScreenStreamRemoved = null;
     this.isMuted = false;
+
+    // Audio processing
+    this.audioContext = null;
+    this.gainNode = null;
+    this.sourceNode = null;
 
     this._setupSocketListeners();
   }
 
   _setupSocketListeners() {
     this.socket.on('voice-existing-peers', (peers) => {
-      // Create offers to all existing peers
       peers.forEach(peer => this._createPeer(peer.socketId, true));
     });
 
@@ -51,13 +54,7 @@ export class VoiceManager {
       }
     });
 
-    this.socket.on('voice-user-left', ({ userId }) => {
-      // Find and remove peer by checking all peers
-      for (const [socketId, peer] of this.peers.entries()) {
-        // We can't easily map userId to socketId here, so we rely on
-        // the peer connection closing naturally. The server will handle cleanup.
-      }
-    });
+    this.socket.on('voice-user-left', ({ userId }) => {});
   }
 
   _createPeer(socketId, isInitiator) {
@@ -68,21 +65,19 @@ export class VoiceManager {
     const peer = new RTCPeerConnection(ICE_SERVERS);
     this.peers.set(socketId, peer);
 
-    // Add local tracks
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(track => {
-        peer.addTrack(track, this.localStream);
+    const streamToSend = this.processedStream || this.localStream;
+    if (streamToSend) {
+      streamToSend.getTracks().forEach(track => {
+        peer.addTrack(track, streamToSend);
       });
     }
 
-    // Handle ICE candidates
     peer.onicecandidate = (event) => {
       if (event.candidate) {
         this.socket.emit('voice-ice-candidate', { to: socketId, candidate: event.candidate });
       }
     };
 
-    // Handle remote tracks
     peer.ontrack = (event) => {
       if (this.onRemoteStream) {
         this.onRemoteStream(socketId, event.streams[0]);
@@ -95,7 +90,6 @@ export class VoiceManager {
       }
     };
 
-    // If initiator, create offer
     if (isInitiator) {
       peer.createOffer()
         .then(offer => peer.setLocalDescription(offer))
@@ -119,9 +113,33 @@ export class VoiceManager {
     }
   }
 
-  async joinVoice(channelId) {
+  async joinVoice(channelId, options = {}) {
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const constraints = {
+        audio: options.inputDevice
+          ? { deviceId: { exact: options.inputDevice } }
+          : true,
+        video: false
+      };
+
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Set up gain node for input volume control
+      try {
+        this.audioContext = new AudioContext();
+        this.sourceNode = this.audioContext.createMediaStreamSource(this.localStream);
+        this.gainNode = this.audioContext.createGain();
+        this.gainNode.gain.value = (options.inputVolume || 100) / 100;
+
+        const destination = this.audioContext.createMediaStreamDestination();
+        this.sourceNode.connect(this.gainNode);
+        this.gainNode.connect(destination);
+        this.processedStream = destination.stream;
+      } catch (err) {
+        console.warn('Could not set up gain node, using raw stream:', err);
+        this.processedStream = this.localStream;
+      }
+
       this.channelId = channelId;
       this.socket.emit('voice-join', { channelId });
       return true;
@@ -135,6 +153,15 @@ export class VoiceManager {
     if (this.localStream) {
       this.localStream.getTracks().forEach(t => t.stop());
       this.localStream = null;
+    }
+    if (this.processedStream) {
+      this.processedStream = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
+      this.gainNode = null;
+      this.sourceNode = null;
     }
     if (this.screenStream) {
       this.screenStream.getTracks().forEach(t => t.stop());
@@ -169,22 +196,16 @@ export class VoiceManager {
         audio: true
       });
 
-      // Add screen tracks to all peers
       const videoTrack = this.screenStream.getVideoTracks()[0];
       for (const [socketId, peer] of this.peers) {
         peer.addTrack(videoTrack, this.screenStream);
-        // Renegotiate
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
         this.socket.emit('voice-offer', { to: socketId, offer: peer.localDescription });
       }
 
       this.socket.emit('screen-share-start', { channelId: this.channelId });
-
-      // Handle user stopping share via browser UI
-      videoTrack.onended = () => {
-        this.stopScreenShare();
-      };
+      videoTrack.onended = () => this.stopScreenShare();
 
       return this.screenStream;
     } catch (err) {

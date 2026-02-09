@@ -2,8 +2,25 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { VoiceManager } from '../utils/webrtc';
+import Settings from './Settings';
 
 const API = '/api';
+
+const DEFAULT_VOICE_SETTINGS = {
+  inputDevice: '',
+  outputDevice: '',
+  inputVolume: 100,
+  outputVolume: 100,
+  pttEnabled: false,
+  pttKey: 'Space',
+};
+
+function loadVoiceSettings() {
+  try {
+    const saved = localStorage.getItem('dicksword-voice-settings');
+    return saved ? { ...DEFAULT_VOICE_SETTINGS, ...JSON.parse(saved) } : DEFAULT_VOICE_SETTINGS;
+  } catch { return DEFAULT_VOICE_SETTINGS; }
+}
 
 export default function MainApp() {
   const { user, token, logout } = useAuth();
@@ -17,9 +34,10 @@ export default function MainApp() {
   const [messages, setMessages] = useState([]);
   const [members, setMembers] = useState([]);
   const [messageInput, setMessageInput] = useState('');
-  const [showModal, setShowModal] = useState(null); // 'create' | 'join' | 'invite' | 'addChannel'
+  const [showModal, setShowModal] = useState(null);
   const [modalInput, setModalInput] = useState('');
   const [modalType, setModalType] = useState('text');
+  const [showSettings, setShowSettings] = useState(false);
 
   // Voice state
   const [voiceChannelId, setVoiceChannelId] = useState(null);
@@ -28,9 +46,14 @@ export default function MainApp() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState(new Map());
   const [screenShareStream, setScreenShareStream] = useState(null);
+  const [voiceSettings, setVoiceSettings] = useState(loadVoiceSettings);
   const voiceManagerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const audioRefs = useRef({});
+  const voiceSettingsRef = useRef(voiceSettings);
+
+  // Keep ref in sync
+  useEffect(() => { voiceSettingsRef.current = voiceSettings; }, [voiceSettings]);
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -78,7 +101,6 @@ export default function MainApp() {
     if (!socket) return;
     const handleJoin = ({ users }) => setVoiceUsers(users);
     const handleLeft = ({ users }) => setVoiceUsers(users);
-
     socket.on('voice-user-joined', handleJoin);
     socket.on('voice-user-left', handleLeft);
     return () => {
@@ -92,24 +114,78 @@ export default function MainApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Play remote audio streams
+  // Play remote audio streams + apply output volume and device
   useEffect(() => {
+    const vol = voiceSettings.outputVolume / 100;
     for (const [socketId, stream] of remoteStreams) {
       if (!audioRefs.current[socketId]) {
         const audio = new Audio();
         audio.srcObject = stream;
         audio.autoplay = true;
+        audio.volume = Math.min(1, vol);
+        if (voiceSettings.outputDevice && audio.setSinkId) {
+          audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
+        }
         audioRefs.current[socketId] = audio;
+      } else {
+        audioRefs.current[socketId].volume = Math.min(1, vol);
       }
     }
-    // Clean up removed streams
     for (const socketId of Object.keys(audioRefs.current)) {
       if (!remoteStreams.has(socketId)) {
         audioRefs.current[socketId].pause();
         delete audioRefs.current[socketId];
       }
     }
-  }, [remoteStreams]);
+  }, [remoteStreams, voiceSettings.outputVolume, voiceSettings.outputDevice]);
+
+  // Push-to-talk
+  useEffect(() => {
+    if (!voiceSettings.pttEnabled || !voiceChannelId) return;
+    const vm = voiceManagerRef.current;
+    if (!vm || !vm.localStream) return;
+
+    // Start muted when PTT is enabled
+    const audioTrack = vm.localStream.getAudioTracks()[0];
+    if (audioTrack) audioTrack.enabled = false;
+    setIsMuted(true);
+
+    const onKeyDown = (e) => {
+      if (e.code === voiceSettingsRef.current.pttKey && audioTrack && !audioTrack.enabled) {
+        audioTrack.enabled = true;
+        setIsMuted(false);
+      }
+    };
+    const onKeyUp = (e) => {
+      if (e.code === voiceSettingsRef.current.pttKey && audioTrack) {
+        audioTrack.enabled = false;
+        setIsMuted(true);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [voiceSettings.pttEnabled, voiceSettings.pttKey, voiceChannelId]);
+
+  // Apply input volume via gain node
+  useEffect(() => {
+    const vm = voiceManagerRef.current;
+    if (!vm || !vm.localStream) return;
+    if (vm.gainNode) {
+      vm.gainNode.gain.value = voiceSettings.inputVolume / 100;
+    }
+  }, [voiceSettings.inputVolume]);
+
+  // ESC to close settings
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape' && showSettings) setShowSettings(false); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showSettings]);
 
   // Send message
   const sendMessage = (e) => {
@@ -181,10 +257,19 @@ export default function MainApp() {
     };
 
     voiceManagerRef.current = vm;
-    const success = await vm.joinVoice(channel.id);
+    const success = await vm.joinVoice(channel.id, {
+      inputDevice: voiceSettings.inputDevice,
+      inputVolume: voiceSettings.inputVolume,
+    });
     if (success) {
       setVoiceChannelId(channel.id);
       setActiveChannel(channel);
+      // If PTT is enabled, start muted
+      if (voiceSettings.pttEnabled) {
+        const track = vm.localStream?.getAudioTracks()[0];
+        if (track) track.enabled = false;
+        setIsMuted(true);
+      }
     }
   };
 
@@ -198,12 +283,12 @@ export default function MainApp() {
     setIsMuted(false);
     setIsScreenSharing(false);
     setRemoteStreams(new Map());
-    // Clean up audio elements
     Object.values(audioRefs.current).forEach(a => a.pause());
     audioRefs.current = {};
   };
 
   const toggleMute = () => {
+    if (voiceSettings.pttEnabled) return; // PTT handles mute
     if (voiceManagerRef.current) {
       const muted = voiceManagerRef.current.toggleMute();
       setIsMuted(muted);
@@ -225,7 +310,6 @@ export default function MainApp() {
     }
   };
 
-  // Format timestamp
   const formatTime = (ts) => {
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -239,6 +323,15 @@ export default function MainApp() {
 
   return (
     <div className="app-layout">
+      {/* Settings overlay */}
+      {showSettings && (
+        <Settings
+          onClose={() => setShowSettings(false)}
+          voiceSettings={voiceSettings}
+          onVoiceSettingsChange={setVoiceSettings}
+        />
+      )}
+
       {/* Server sidebar */}
       <div className="server-sidebar">
         {servers.map(s => (
@@ -342,6 +435,7 @@ export default function MainApp() {
               <div className="username">{user.username}</div>
               <div className="status">Online</div>
             </div>
+            <button className="user-panel-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
             <button className="user-panel-btn" onClick={() => setShowModal('invite')} title="Invite">📋</button>
             <button className="user-panel-btn" onClick={logout} title="Log Out">🚪</button>
           </div>
@@ -363,6 +457,7 @@ export default function MainApp() {
             <div className="user-info">
               <div className="username">{user.username}</div>
             </div>
+            <button className="user-panel-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
             <button className="user-panel-btn" onClick={logout} title="Log Out">🚪</button>
           </div>
         </div>
@@ -425,11 +520,7 @@ export default function MainApp() {
                 {screenShareStream && (
                   <div className="screen-share-container">
                     <div className="screen-share-label">You are sharing your screen</div>
-                    <video
-                      autoPlay
-                      muted
-                      ref={el => { if (el) el.srcObject = screenShareStream; }}
-                    />
+                    <video autoPlay muted ref={el => { if (el) el.srcObject = screenShareStream; }} />
                   </div>
                 )}
                 {!screenShareStream && (
@@ -456,7 +547,9 @@ export default function MainApp() {
                   {voiceChannelId === activeChannel.id ? (
                     <>
                       <button className={`voice-btn mute ${isMuted ? 'muted' : ''}`} onClick={toggleMute}>
-                        {isMuted ? '🔇 Unmute' : '🎤 Mute'}
+                        {voiceSettings.pttEnabled
+                          ? (isMuted ? '🔇 PTT Off' : '🎤 PTT On')
+                          : (isMuted ? '🔇 Unmute' : '🎤 Mute')}
                       </button>
                       <button className={`voice-btn screen-share ${isScreenSharing ? 'sharing' : ''}`} onClick={toggleScreenShare}>
                         {isScreenSharing ? '⏹️ Stop Share' : '🖥️ Share Screen'}
@@ -506,13 +599,7 @@ export default function MainApp() {
               <>
                 <h2>Create a Server</h2>
                 <label>Server Name</label>
-                <input
-                  value={modalInput}
-                  onChange={e => setModalInput(e.target.value)}
-                  placeholder="My Awesome Server"
-                  autoFocus
-                  onKeyDown={e => e.key === 'Enter' && modalInput && createServer()}
-                />
+                <input value={modalInput} onChange={e => setModalInput(e.target.value)} placeholder="My Awesome Server" autoFocus onKeyDown={e => e.key === 'Enter' && modalInput && createServer()} />
                 <div className="modal-buttons">
                   <button className="btn-cancel" onClick={() => setShowModal(null)}>Cancel</button>
                   <button className="btn-submit" onClick={createServer} disabled={!modalInput}>Create</button>
@@ -523,13 +610,7 @@ export default function MainApp() {
               <>
                 <h2>Join a Server</h2>
                 <label>Invite Code</label>
-                <input
-                  value={modalInput}
-                  onChange={e => setModalInput(e.target.value)}
-                  placeholder="Enter an invite code"
-                  autoFocus
-                  onKeyDown={e => e.key === 'Enter' && modalInput && joinServer()}
-                />
+                <input value={modalInput} onChange={e => setModalInput(e.target.value)} placeholder="Enter an invite code" autoFocus onKeyDown={e => e.key === 'Enter' && modalInput && joinServer()} />
                 <div className="modal-buttons">
                   <button className="btn-cancel" onClick={() => setShowModal(null)}>Cancel</button>
                   <button className="btn-submit" onClick={joinServer} disabled={!modalInput}>Join</button>
@@ -539,16 +620,11 @@ export default function MainApp() {
             {showModal === 'invite' && activeServer && (
               <>
                 <h2>Invite Friends</h2>
-                <p style={{ color: 'var(--text-muted)', marginBottom: 12, fontSize: 14 }}>
-                  Share this invite code with your friends:
-                </p>
+                <p style={{ color: 'var(--text-muted)', marginBottom: 12, fontSize: 14 }}>Share this invite code with your friends:</p>
                 <div className="invite-code">{activeServer.invite_code}</div>
                 <p style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>Click to select, then copy</p>
                 <div className="modal-buttons" style={{ marginTop: 16 }}>
-                  <button className="btn-submit" onClick={() => {
-                    navigator.clipboard.writeText(activeServer.invite_code);
-                    setShowModal(null);
-                  }}>Copy & Close</button>
+                  <button className="btn-submit" onClick={() => { navigator.clipboard.writeText(activeServer.invite_code); setShowModal(null); }}>Copy & Close</button>
                 </div>
               </>
             )}
@@ -557,25 +633,11 @@ export default function MainApp() {
                 <h2>Create Channel</h2>
                 <label>Channel Type</label>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                  <button
-                    className="btn-submit"
-                    style={{ background: modalType === 'text' ? 'var(--brand-color)' : 'var(--bg-tertiary)', flex: 1 }}
-                    onClick={() => setModalType('text')}
-                  ># Text</button>
-                  <button
-                    className="btn-submit"
-                    style={{ background: modalType === 'voice' ? 'var(--brand-color)' : 'var(--bg-tertiary)', flex: 1 }}
-                    onClick={() => setModalType('voice')}
-                  >🔊 Voice</button>
+                  <button className="btn-submit" style={{ background: modalType === 'text' ? 'var(--brand-color)' : 'var(--bg-tertiary)', flex: 1 }} onClick={() => setModalType('text')}># Text</button>
+                  <button className="btn-submit" style={{ background: modalType === 'voice' ? 'var(--brand-color)' : 'var(--bg-tertiary)', flex: 1 }} onClick={() => setModalType('voice')}>🔊 Voice</button>
                 </div>
                 <label>Channel Name</label>
-                <input
-                  value={modalInput}
-                  onChange={e => setModalInput(e.target.value)}
-                  placeholder={modalType === 'text' ? 'general' : 'Voice Chat'}
-                  autoFocus
-                  onKeyDown={e => e.key === 'Enter' && modalInput && addChannel()}
-                />
+                <input value={modalInput} onChange={e => setModalInput(e.target.value)} placeholder={modalType === 'text' ? 'general' : 'Voice Chat'} autoFocus onKeyDown={e => e.key === 'Enter' && modalInput && addChannel()} />
                 <div className="modal-buttons">
                   <button className="btn-cancel" onClick={() => setShowModal(null)}>Cancel</button>
                   <button className="btn-submit" onClick={addChannel} disabled={!modalInput}>Create</button>
