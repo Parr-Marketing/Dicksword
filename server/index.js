@@ -37,6 +37,9 @@ if (process.env.NODE_ENV === 'production') {
 // Initialize database
 initDB();
 
+// Health check (for Railway)
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
 // Auth routes
 app.use('/api/auth', authRouter);
 
