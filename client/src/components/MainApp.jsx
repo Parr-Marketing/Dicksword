@@ -13,6 +13,7 @@ const DEFAULT_VOICE_SETTINGS = {
   outputVolume: 100,
   pttEnabled: false,
   pttKey: 'Space',
+  muteKey: '',
 };
 
 function loadVoiceSettings() {
@@ -172,6 +173,24 @@ export default function MainApp() {
       window.removeEventListener('keyup', onKeyUp);
     };
   }, [voiceSettings.pttEnabled, voiceSettings.pttKey, voiceChannelId]);
+
+  // Mute toggle key
+  useEffect(() => {
+    const key = voiceSettingsRef.current.muteKey;
+    if (!key || !voiceChannelId) return;
+    // Don't use mute key if PTT is enabled (PTT handles mute)
+    if (voiceSettingsRef.current.pttEnabled) return;
+
+    const onKeyDown = (e) => {
+      if (e.code === voiceSettingsRef.current.muteKey && voiceManagerRef.current) {
+        const muted = voiceManagerRef.current.toggleMute();
+        setIsMuted(muted);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [voiceSettings.muteKey, voiceSettings.pttEnabled, voiceChannelId]);
 
   // Apply input volume via gain node
   useEffect(() => {

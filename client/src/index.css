@@ -1124,6 +1124,42 @@ a {
   border-color: var(--brand-color);
 }
 
+/* Listenback */
+.listenback-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listenback-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.listenback-progress-fill {
+  height: 100%;
+  background: var(--brand-color);
+  border-radius: 4px;
+  transition: width 0.1s linear;
+}
+
+.listenback-progress-fill.recording {
+  background: var(--red);
+}
+
+.listenback-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.listenback-btns {
+  display: flex;
+  gap: 8px;
+}
+
 /* Mobile back button - hidden on desktop */
 .mobile-back-btn {
   display: none;
