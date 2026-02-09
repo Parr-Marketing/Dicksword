@@ -590,6 +590,120 @@ a {
   color: var(--text-normal);
 }
 
+/* Voice participants list with per-user controls */
+.voice-participants-list {
+  width: 100%;
+  max-width: 500px;
+  padding: 0 20px;
+}
+
+.voice-participant-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.voice-participant-row:hover {
+  background: var(--bg-modifier-hover);
+}
+
+.voice-participant-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.voice-user-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.voice-user-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.user-volume-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  min-width: 80px;
+}
+
+.user-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--brand-color);
+  cursor: pointer;
+}
+
+.user-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--brand-color);
+  cursor: pointer;
+  border: none;
+}
+
+.user-volume-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 32px;
+  text-align: right;
+}
+
+.voice-user-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.voice-user-btn:hover {
+  background: var(--bg-modifier-active);
+  color: var(--text-normal);
+}
+
+.voice-user-btn.muted {
+  color: var(--red);
+}
+
+.voice-user-btn.add-friend {
+  font-size: 12px;
+}
+
+.voice-user-btn.add-friend:hover {
+  color: var(--green);
+}
+
+.voice-user-btn.add-friend.sent {
+  color: var(--green);
+  opacity: 0.6;
+  cursor: default;
+}
+
 .voice-controls {
   display: flex;
   gap: 8px;

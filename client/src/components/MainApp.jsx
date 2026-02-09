@@ -52,13 +52,45 @@ export default function MainApp() {
   const [screenShareStream, setScreenShareStream] = useState(null); // local share
   const [remoteScreenShare, setRemoteScreenShare] = useState(null); // { socketId, stream }
   const [voiceSettings, setVoiceSettings] = useState(loadVoiceSettings);
+  const [userVolumes, setUserVolumes] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dicksword-user-volumes');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+  const [userMuted, setUserMuted] = useState(new Set());
+  const [friendRequestsSent, setFriendRequestsSent] = useState(new Set());
   const voiceManagerRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const audioRefs = useRef({});
+  const audioRefs = useRef({}); // socketId -> { audio, ctx?, gain? }
   const voiceSettingsRef = useRef(voiceSettings);
 
   // Keep ref in sync
   useEffect(() => { voiceSettingsRef.current = voiceSettings; }, [voiceSettings]);
+
+  // Persist per-user volumes
+  useEffect(() => {
+    localStorage.setItem('dicksword-user-volumes', JSON.stringify(userVolumes));
+  }, [userVolumes]);
+
+  const toggleUserMute = (userId) => {
+    setUserMuted(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId); else next.add(userId);
+      return next;
+    });
+  };
+
+  const sendFriendRequestFromVoice = async (username) => {
+    try {
+      const res = await fetch(`${API}/friends/request`, {
+        method: 'POST', headers, body: JSON.stringify({ username })
+      });
+      if (res.ok) {
+        setFriendRequestsSent(prev => new Set(prev).add(username));
+      }
+    } catch {}
+  };
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -119,30 +151,73 @@ export default function MainApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Play remote audio streams + apply output volume, device, and deafen
+  // Play remote audio streams with per-user gain control (supports 0-200% per user)
   useEffect(() => {
-    const vol = isDeafened ? 0 : voiceSettings.outputVolume / 100;
+    const globalVol = isDeafened ? 0 : voiceSettings.outputVolume / 100;
+
     for (const [socketId, stream] of remoteStreams) {
+      // Find userId for this socketId
+      const vu = voiceUsers.find(u => u.socketId === socketId);
+      const userId = vu?.userId;
+      const perUserVol = (userId && userMuted.has(userId)) ? 0
+        : ((userId && userVolumes[userId] !== undefined) ? userVolumes[userId] : 100) / 100;
+      const finalGain = globalVol * perUserVol;
+
       if (!audioRefs.current[socketId]) {
-        const audio = new Audio();
-        audio.srcObject = stream;
-        audio.autoplay = true;
-        audio.volume = Math.min(1, vol);
-        if (voiceSettings.outputDevice && audio.setSinkId) {
-          audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
+        try {
+          // Audio processing: source -> gain -> destination -> Audio element
+          const ctx = new AudioContext();
+          const source = ctx.createMediaStreamSource(stream);
+          const gain = ctx.createGain();
+          const dest = ctx.createMediaStreamDestination();
+          gain.gain.value = finalGain;
+          source.connect(gain);
+          gain.connect(dest);
+
+          const audio = new Audio();
+          audio.srcObject = dest.stream;
+          audio.autoplay = true;
+          audio.volume = 1;
+          if (voiceSettings.outputDevice && audio.setSinkId) {
+            audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
+          }
+          audioRefs.current[socketId] = { audio, ctx, gain };
+        } catch (err) {
+          // Fallback: simple Audio element without gain node
+          const audio = new Audio();
+          audio.srcObject = stream;
+          audio.autoplay = true;
+          audio.volume = Math.min(1, finalGain);
+          if (voiceSettings.outputDevice && audio.setSinkId) {
+            audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
+          }
+          audioRefs.current[socketId] = { audio };
         }
-        audioRefs.current[socketId] = audio;
       } else {
-        audioRefs.current[socketId].volume = Math.min(1, vol);
+        // Update gain or volume
+        const ref = audioRefs.current[socketId];
+        if (ref.gain) {
+          ref.gain.gain.value = finalGain;
+        } else {
+          ref.audio.volume = Math.min(1, finalGain);
+        }
+        // Update output device
+        if (voiceSettings.outputDevice && ref.audio.setSinkId) {
+          ref.audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
+        }
       }
     }
+
+    // Cleanup removed streams
     for (const socketId of Object.keys(audioRefs.current)) {
       if (!remoteStreams.has(socketId)) {
-        audioRefs.current[socketId].pause();
+        const ref = audioRefs.current[socketId];
+        ref.audio.pause();
+        if (ref.ctx) ref.ctx.close().catch(() => {});
         delete audioRefs.current[socketId];
       }
     }
-  }, [remoteStreams, voiceSettings.outputVolume, voiceSettings.outputDevice, isDeafened]);
+  }, [remoteStreams, voiceSettings.outputVolume, voiceSettings.outputDevice, isDeafened, userVolumes, userMuted, voiceUsers]);
 
   // Push-to-talk
   useEffect(() => {
@@ -315,7 +390,11 @@ export default function MainApp() {
     setScreenShareStream(null);
     setRemoteScreenShare(null);
     setRemoteStreams(new Map());
-    Object.values(audioRefs.current).forEach(a => a.pause());
+    setFriendRequestsSent(new Set());
+    for (const ref of Object.values(audioRefs.current)) {
+      ref.audio.pause();
+      if (ref.ctx) ref.ctx.close().catch(() => {});
+    }
     audioRefs.current = {};
   };
 
@@ -629,23 +708,63 @@ export default function MainApp() {
                     <video autoPlay ref={el => { if (el) el.srcObject = remoteScreenShare.stream; }} />
                   </div>
                 )}
-                {/* Voice participants (shown when no screen share) */}
+                {/* Voice participants with per-user controls */}
                 {!screenShareStream && !remoteScreenShare && (
                   <>
                     <h2>{activeChannel.name}</h2>
-                    <div className="voice-participants">
+                    <div className="voice-participants-list">
                       {voiceUsers.map(u => (
-                        <div key={u.socketId} className="voice-participant">
-                          <div className="voice-participant-avatar" style={{ background: '#5865F2' }}>
+                        <div key={u.socketId} className="voice-participant-row">
+                          <div className="voice-participant-avatar" style={{ background: '#5865F2', width: 40, height: 40, fontSize: 16 }}>
                             {getInitials(u.username)}
                           </div>
-                          <span className="voice-participant-name">
-                            {u.username} {u.userId === user.id && '(You)'}
-                          </span>
+                          <div className="voice-participant-details">
+                            <span className="voice-participant-name">
+                              {u.username} {u.userId === user.id && '(You)'}
+                            </span>
+                            {u.userId !== user.id && voiceChannelId && (
+                              <div className="voice-user-controls">
+                                <div className="voice-user-volume">
+                                  <button
+                                    className={`voice-user-btn ${userMuted.has(u.userId) ? 'muted' : ''}`}
+                                    onClick={() => toggleUserMute(u.userId)}
+                                    title={userMuted.has(u.userId) ? 'Unmute User' : 'Mute User'}
+                                  >
+                                    {userMuted.has(u.userId) ? '🔇' : '🔊'}
+                                  </button>
+                                  <input
+                                    type="range"
+                                    className="user-volume-slider"
+                                    min="0"
+                                    max="200"
+                                    value={userMuted.has(u.userId) ? 0 : (userVolumes[u.userId] ?? 100)}
+                                    onChange={e => {
+                                      const val = parseInt(e.target.value);
+                                      setUserVolumes(prev => ({ ...prev, [u.userId]: val }));
+                                      if (val > 0 && userMuted.has(u.userId)) {
+                                        setUserMuted(prev => { const n = new Set(prev); n.delete(u.userId); return n; });
+                                      }
+                                    }}
+                                  />
+                                  <span className="user-volume-label">
+                                    {userMuted.has(u.userId) ? 0 : (userVolumes[u.userId] ?? 100)}%
+                                  </span>
+                                </div>
+                                <button
+                                  className={`voice-user-btn add-friend ${friendRequestsSent.has(u.username) ? 'sent' : ''}`}
+                                  onClick={() => sendFriendRequestFromVoice(u.username)}
+                                  title={friendRequestsSent.has(u.username) ? 'Request Sent' : 'Add Friend'}
+                                  disabled={friendRequestsSent.has(u.username)}
+                                >
+                                  {friendRequestsSent.has(u.username) ? '✓' : '👤+'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                       {voiceUsers.length === 0 && (
-                        <p style={{ color: 'var(--text-muted)' }}>No one is in this voice channel</p>
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No one is in this voice channel</p>
                       )}
                     </div>
                   </>

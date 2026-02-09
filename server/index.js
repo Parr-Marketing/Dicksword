@@ -208,6 +208,32 @@ app.delete('/api/friends/:friendshipId', authenticateToken, (req, res) => {
   res.json({ success: true });
 });
 
+// --- Recently Seen route ---
+app.get('/api/recently-seen', authenticateToken, (req, res) => {
+  const userId = req.user.id;
+  const seen = recentlySeen.get(userId);
+  if (!seen) return res.json([]);
+
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+  // Get existing friend/pending IDs to exclude
+  const excludeIds = new Set(
+    db().prepare(`
+      SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END as fid
+      FROM friendships WHERE (sender_id = ? OR receiver_id = ?)
+    `).all(userId, userId, userId).map(f => f.fid)
+  );
+
+  const results = [];
+  for (const [seenId, data] of seen) {
+    if (data.lastSeen > oneDayAgo && !excludeIds.has(seenId)) {
+      results.push(data);
+    }
+  }
+  results.sort((a, b) => b.lastSeen - a.lastSeen);
+  res.json(results);
+});
+
 // --- Profile route ---
 app.put('/api/profile', authenticateToken, (req, res) => {
   const { username, avatar_color } = req.body;
@@ -234,6 +260,20 @@ io.use((socket, next) => {
 const voiceState = new Map(); // channelId -> Set of { socketId, userId, username }
 // Track online users: userId -> socketId
 const onlineUsers = new Map();
+// Track recently seen users in voice: userId -> Map<seenUserId, { userId, username, avatar_color, lastSeen }>
+const recentlySeen = new Map();
+
+function updateRecentlySeen(userId, seenUserId, seenUsername) {
+  if (userId === seenUserId) return;
+  if (!recentlySeen.has(userId)) recentlySeen.set(userId, new Map());
+  const seenUser = db().prepare('SELECT avatar_color FROM users WHERE id = ?').get(seenUserId);
+  recentlySeen.get(userId).set(seenUserId, {
+    userId: seenUserId,
+    username: seenUsername,
+    avatar_color: seenUser?.avatar_color || '#5865F2',
+    lastSeen: Date.now()
+  });
+}
 
 io.on('connection', (socket) => {
   console.log(`${socket.user.username} connected`);
@@ -279,6 +319,19 @@ io.on('connection', (socket) => {
 
   // Voice channel signaling
   setupSignaling(io, socket, voiceState);
+
+  // Track recently seen users when joining voice channels
+  socket.on('voice-join', ({ channelId }) => {
+    const users = voiceState.get(channelId);
+    if (users) {
+      for (const u of [...users]) {
+        if (u.userId !== socket.user.id) {
+          updateRecentlySeen(socket.user.id, u.userId, u.username);
+          updateRecentlySeen(u.userId, socket.user.id, socket.user.username);
+        }
+      }
+    }
+  });
 
   socket.on('disconnect', () => {
     console.log(`${socket.user.username} disconnected`);
