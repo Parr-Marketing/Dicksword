@@ -4,7 +4,7 @@ import { useSocket } from '../context/SocketContext';
 
 const API = '/api';
 
-export default function Friends() {
+export default function Friends({ onBack }) {
   const { token } = useAuth();
   const socket = useSocket();
   const [tab, setTab] = useState('online'); // online | all | pending | recently | add
@@ -128,6 +128,7 @@ export default function Friends() {
     <div className="friends-page">
       {/* Header */}
       <div className="friends-header">
+        {onBack && <button className="mobile-back-btn" onClick={onBack}>←</button>}
         <span className="friends-header-icon">👥</span>
         <span className="friends-header-title">Friends</span>
         <div className="friends-tabs">

@@ -801,7 +801,7 @@ export default function MainApp() {
             </>
           )
         ) : !activeServer ? (
-          <Friends />
+          <Friends onBack={() => setMobileView('channels')} />
         ) : (
           <div className="empty-state">
             <div className="icon">🗡️</div>
