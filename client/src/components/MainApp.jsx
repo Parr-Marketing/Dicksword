@@ -67,6 +67,7 @@ export default function MainApp() {
   const [friendRequestsSent, setFriendRequestsSent] = useState(new Set());
   const [selectedProfileUserId, setSelectedProfileUserId] = useState(null);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [speakingUsers, setSpeakingUsers] = useState(new Set()); // socketIds currently speaking
   const attachmentInputRef = useRef(null);
   const serverIconInputRef = useRef(null);
   const serverBannerInputRef = useRef(null);
@@ -440,6 +441,13 @@ export default function MainApp() {
     vm.onScreenShareStopped = () => {
       setRemoteScreenShare(null);
     };
+    vm.onSpeakingChange = (socketId, isSpeaking) => {
+      setSpeakingUsers(prev => {
+        const next = new Set(prev);
+        if (isSpeaking) next.add(socketId); else next.delete(socketId);
+        return next;
+      });
+    };
 
     voiceManagerRef.current = vm;
     const success = await vm.joinVoice(channel.id, {
@@ -475,6 +483,7 @@ export default function MainApp() {
     setRemoteScreenShare(null);
     setRemoteStreams(new Map());
     setFriendRequestsSent(new Set());
+    setSpeakingUsers(new Set());
     for (const ref of Object.values(audioRefs.current)) {
       ref.audio.pause();
       if (ref.ctx) ref.ctx.close().catch(() => {});
@@ -621,7 +630,7 @@ export default function MainApp() {
                       <div className="voice-users-list">
                         {voiceUsers.map(u => (
                           <div key={u.socketId} className="voice-user-item">
-                            <div className="voice-user-avatar" style={{ background: '#5865F2' }}>
+                            <div className={`voice-user-avatar ${speakingUsers.has(u.socketId) || (u.userId === user.id && speakingUsers.has('local')) ? 'speaking' : ''}`} style={{ background: '#5865F2' }}>
                               {getInitials(u.username)}
                             </div>
                             <span>{u.username}</span>
@@ -824,7 +833,7 @@ export default function MainApp() {
                     <div className="voice-participants-list">
                       {voiceUsers.map(u => (
                         <div key={u.socketId} className="voice-participant-row">
-                          <div className="voice-participant-avatar" style={{ background: '#5865F2', width: 40, height: 40, fontSize: 16 }}>
+                          <div className={`voice-participant-avatar ${speakingUsers.has(u.socketId) || (u.userId === user.id && speakingUsers.has('local')) ? 'speaking' : ''}`} style={{ background: '#5865F2', width: 40, height: 40, fontSize: 16 }}>
                             {getInitials(u.username)}
                           </div>
                           <div className="voice-participant-details">

@@ -48,6 +48,7 @@ function setupSignaling(io, socket, voiceState) {
     io.to(`voice:${channelId}`).emit('voice-user-left', {
       userId: socket.user.id,
       username: socket.user.username,
+      socketId: socket.id,
       users: [...(voiceState.get(channelId) || [])]
     });
   });
