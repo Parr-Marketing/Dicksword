@@ -4,6 +4,9 @@ import { compressAvatar, compressBanner } from '../utils/imageCompression';
 
 const API = '/api';
 const MAX_LISTENBACK_SECS = 10;
+const GITHUB_RELEASES = 'https://github.com/Parr-Marketing/Dicksword/releases/latest';
+const DOWNLOAD_WIN = `${GITHUB_RELEASES}/download/Dicksword-Setup-1.0.0.exe`;
+const DOWNLOAD_MAC = `${GITHUB_RELEASES}/download/Dicksword-1.0.0.dmg`;
 
 export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange }) {
   const { user, token } = useAuth();
@@ -427,6 +430,7 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
     { id: 'account', label: 'My Account' },
     { id: 'profile', label: 'Profile' },
     { id: 'voice', label: 'Voice & Audio' },
+    { id: 'app', label: 'Get the App' },
   ];
 
   return (
@@ -762,6 +766,31 @@ export default function Settings({ onClose, voiceSettings, onVoiceSettingsChange
               <div className="settings-actions" style={{ marginTop: 24 }}>
                 {saveMsg && <span style={{ color: 'var(--green)', fontSize: 14 }}>{saveMsg}</span>}
                 <button className="btn-submit" onClick={saveVoiceSettings}>Save Voice Settings</button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'app' && (
+            <div className="settings-section">
+              <h2>Get the Desktop App</h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
+                Download Dicksword for your computer for the best experience — native notifications, global keybinds, and a dedicated window.
+              </p>
+              <div className="download-buttons" style={{ justifyContent: 'flex-start' }}>
+                <a href={DOWNLOAD_WIN} className="download-btn windows" target="_blank" rel="noopener noreferrer">
+                  <span className="download-icon">🪟</span>
+                  <span className="download-text">
+                    <span className="download-label">Download for</span>
+                    <span className="download-platform">Windows</span>
+                  </span>
+                </a>
+                <a href={DOWNLOAD_MAC} className="download-btn mac" target="_blank" rel="noopener noreferrer">
+                  <span className="download-icon">🍎</span>
+                  <span className="download-text">
+                    <span className="download-label">Download for</span>
+                    <span className="download-platform">macOS</span>
+                  </span>
+                </a>
               </div>
             </div>
           )}

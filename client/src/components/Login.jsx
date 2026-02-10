@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+const GITHUB_RELEASES = 'https://github.com/Parr-Marketing/Dicksword/releases/latest';
+const DOWNLOAD_WIN = `${GITHUB_RELEASES}/download/Dicksword-Setup-1.0.0.exe`;
+const DOWNLOAD_MAC = `${GITHUB_RELEASES}/download/Dicksword-1.0.0.dmg`;
+
 export default function Login() {
   const { login, register } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
@@ -80,6 +84,27 @@ export default function Login() {
           )}
         </p>
       </form>
+
+      {/* Download section */}
+      <div className="download-section">
+        <p className="download-title">Get the Desktop App</p>
+        <div className="download-buttons">
+          <a href={DOWNLOAD_WIN} className="download-btn windows" target="_blank" rel="noopener noreferrer">
+            <span className="download-icon">🪟</span>
+            <span className="download-text">
+              <span className="download-label">Download for</span>
+              <span className="download-platform">Windows</span>
+            </span>
+          </a>
+          <a href={DOWNLOAD_MAC} className="download-btn mac" target="_blank" rel="noopener noreferrer">
+            <span className="download-icon">🍎</span>
+            <span className="download-text">
+              <span className="download-label">Download for</span>
+              <span className="download-platform">macOS</span>
+            </span>
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

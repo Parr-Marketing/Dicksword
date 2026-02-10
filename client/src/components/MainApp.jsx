@@ -580,6 +580,7 @@ export default function MainApp() {
           )}
           <div className="channel-sidebar-header">
             <span style={{ flex: 1 }}>{activeServer.name}</span>
+            <button className="server-customize-btn" onClick={() => setShowModal('invite')} title="Invite People">👥+</button>
             {activeServer.owner_id === user.id && (
               <button className="server-customize-btn" onClick={() => setShowModal('serverCustomize')} title="Customize Server">⚙️</button>
             )}
