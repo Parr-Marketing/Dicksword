@@ -28,7 +28,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "icon.png"
+      "icon": "icon.ico"
     },
     "mac": {
       "target": [
@@ -44,7 +44,7 @@
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
-      "installerIcon": "icon.png"
+      "installerIcon": "icon.ico"
     }
   }
 }

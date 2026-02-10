@@ -16,7 +16,8 @@ function createWindow() {
     title: 'Dicksword',
     icon: path.join(__dirname, 'icon.png'),
     backgroundColor: '#313338',
-    titleBarStyle: 'hidden',
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 10, y: 10 },
     titleBarOverlay: {
       color: '#1e1f22',
       symbolColor: '#dbdee1',

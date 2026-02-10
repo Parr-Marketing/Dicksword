@@ -423,6 +423,7 @@ io.on('connection', (socket) => {
         users.delete(user);
         if (users.size === 0) voiceState.delete(channelId);
         io.to(`voice:${channelId}`).emit('voice-user-left', {
+          channelId,
           userId: socket.user.id,
           username: socket.user.username,
           socketId: socket.id,

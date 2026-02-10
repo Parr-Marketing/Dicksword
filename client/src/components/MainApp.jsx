@@ -68,6 +68,7 @@ export default function MainApp() {
   const [selectedProfileUserId, setSelectedProfileUserId] = useState(null);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [speakingUsers, setSpeakingUsers] = useState(new Set()); // socketIds currently speaking
+  const [voiceChannelUsers, setVoiceChannelUsers] = useState({}); // channelId -> users[]
   const attachmentInputRef = useRef(null);
   const serverIconInputRef = useRef(null);
   const serverBannerInputRef = useRef(null);
@@ -188,6 +189,12 @@ export default function MainApp() {
       setChannels(c);
       const textChannel = c.find(ch => ch.type === 'text');
       if (textChannel && !activeChannel) setActiveChannel(textChannel);
+      // Query voice users for each voice channel
+      if (socket) {
+        c.filter(ch => ch.type === 'voice').forEach(ch => {
+          socket.emit('voice-get-users', { channelId: ch.id });
+        });
+      }
     });
     fetch(`${API}/servers/${activeServer.id}/members`, { headers }).then(r => r.json()).then(setMembers);
     if (socket) socket.emit('join-server', activeServer.id);
@@ -218,13 +225,24 @@ export default function MainApp() {
   // Listen for voice state updates
   useEffect(() => {
     if (!socket) return;
-    const handleJoin = ({ users }) => setVoiceUsers(users);
-    const handleLeft = ({ users }) => setVoiceUsers(users);
+    const handleJoin = ({ users, channelId }) => {
+      setVoiceUsers(users);
+      if (channelId) setVoiceChannelUsers(prev => ({ ...prev, [channelId]: users }));
+    };
+    const handleLeft = ({ users, channelId }) => {
+      setVoiceUsers(users);
+      if (channelId) setVoiceChannelUsers(prev => ({ ...prev, [channelId]: users }));
+    };
+    const handleVoiceUsers = ({ channelId, users }) => {
+      setVoiceChannelUsers(prev => ({ ...prev, [channelId]: users }));
+    };
     socket.on('voice-user-joined', handleJoin);
     socket.on('voice-user-left', handleLeft);
+    socket.on('voice-users', handleVoiceUsers);
     return () => {
       socket.off('voice-user-joined', handleJoin);
       socket.off('voice-user-left', handleLeft);
+      socket.off('voice-users', handleVoiceUsers);
     };
   }, [socket]);
 
@@ -233,57 +251,31 @@ export default function MainApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Play remote audio streams with per-user gain control (supports 0-200% per user)
+  // Play remote audio streams — direct stream playback with per-user volume
   useEffect(() => {
     const globalVol = isDeafened ? 0 : voiceSettings.outputVolume / 100;
 
     for (const [socketId, stream] of remoteStreams) {
-      // Find userId for this socketId
       const vu = voiceUsers.find(u => u.socketId === socketId);
       const userId = vu?.userId;
       const perUserVol = (userId && userMuted.has(userId)) ? 0
         : ((userId && userVolumes[userId] !== undefined) ? userVolumes[userId] : 100) / 100;
-      const finalGain = globalVol * perUserVol;
+      const finalVol = Math.min(1, globalVol * perUserVol);
 
       if (!audioRefs.current[socketId]) {
-        try {
-          // Audio processing: source -> gain -> destination -> Audio element
-          const ctx = new AudioContext();
-          const source = ctx.createMediaStreamSource(stream);
-          const gain = ctx.createGain();
-          const dest = ctx.createMediaStreamDestination();
-          gain.gain.value = finalGain;
-          source.connect(gain);
-          gain.connect(dest);
-
-          const audio = new Audio();
-          audio.srcObject = dest.stream;
-          audio.autoplay = true;
-          audio.volume = 1;
-          if (voiceSettings.outputDevice && audio.setSinkId) {
-            audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
-          }
-          audioRefs.current[socketId] = { audio, ctx, gain };
-        } catch (err) {
-          // Fallback: simple Audio element without gain node
-          const audio = new Audio();
-          audio.srcObject = stream;
-          audio.autoplay = true;
-          audio.volume = Math.min(1, finalGain);
-          if (voiceSettings.outputDevice && audio.setSinkId) {
-            audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
-          }
-          audioRefs.current[socketId] = { audio };
+        // Create audio element with stream directly — no AudioContext chain
+        const audio = new Audio();
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        audio.volume = finalVol;
+        if (voiceSettings.outputDevice && audio.setSinkId) {
+          audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
         }
+        audio.play().catch(err => console.error('Audio play failed:', err));
+        audioRefs.current[socketId] = { audio };
       } else {
-        // Update gain or volume
         const ref = audioRefs.current[socketId];
-        if (ref.gain) {
-          ref.gain.gain.value = finalGain;
-        } else {
-          ref.audio.volume = Math.min(1, finalGain);
-        }
-        // Update output device
+        ref.audio.volume = finalVol;
         if (voiceSettings.outputDevice && ref.audio.setSinkId) {
           ref.audio.setSinkId(voiceSettings.outputDevice).catch(() => {});
         }
@@ -295,7 +287,7 @@ export default function MainApp() {
       if (!remoteStreams.has(socketId)) {
         const ref = audioRefs.current[socketId];
         ref.audio.pause();
-        if (ref.ctx) ref.ctx.close().catch(() => {});
+        ref.audio.srcObject = null;
         delete audioRefs.current[socketId];
       }
     }
@@ -626,18 +618,21 @@ export default function MainApp() {
                       <span className="channel-icon">🔊</span>
                       <span className="channel-name">{c.name}</span>
                     </div>
-                    {voiceChannelId === c.id && voiceUsers.length > 0 && (
-                      <div className="voice-users-list">
-                        {voiceUsers.map(u => (
-                          <div key={u.socketId} className="voice-user-item">
-                            <div className={`voice-user-avatar ${speakingUsers.has(u.socketId) || (u.userId === user.id && speakingUsers.has('local')) ? 'speaking' : ''}`} style={{ background: '#5865F2' }}>
-                              {getInitials(u.username)}
+                    {(() => {
+                      const usersInChannel = voiceChannelId === c.id ? voiceUsers : (voiceChannelUsers[c.id] || []);
+                      return usersInChannel.length > 0 && (
+                        <div className="voice-users-list">
+                          {usersInChannel.map(u => (
+                            <div key={u.socketId} className="voice-user-item">
+                              <div className={`voice-user-avatar ${speakingUsers.has(u.socketId) || (u.userId === user.id && speakingUsers.has('local')) ? 'speaking' : ''}`} style={{ background: '#5865F2' }}>
+                                {getInitials(u.username)}
+                              </div>
+                              <span>{u.username}</span>
                             </div>
-                            <span>{u.username}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </>

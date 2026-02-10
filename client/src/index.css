@@ -339,6 +339,7 @@ a {
   font-weight: 600;
   color: var(--header-primary);
   border-bottom: 1px solid var(--bg-tertiary);
+  -webkit-app-region: drag;
   flex-shrink: 0;
 }
 
@@ -503,6 +504,14 @@ a {
   gap: 8px;
   border-bottom: 1px solid var(--bg-tertiary);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+/* Buttons inside drag regions need to be clickable */
+.channel-sidebar-header button,
+.main-header button,
+.main-header input {
+  -webkit-app-region: no-drag;
 }
 
 .main-header .channel-hash {

@@ -21,6 +21,7 @@ function setupSignaling(io, socket, voiceState) {
     // Tell everyone in the channel about the new user
     const users = [...voiceState.get(channelId)];
     io.to(`voice:${channelId}`).emit('voice-user-joined', {
+      channelId,
       userId: socket.user.id,
       username: socket.user.username,
       socketId: socket.id,
@@ -46,6 +47,7 @@ function setupSignaling(io, socket, voiceState) {
     }
 
     io.to(`voice:${channelId}`).emit('voice-user-left', {
+      channelId,
       userId: socket.user.id,
       username: socket.user.username,
       socketId: socket.id,

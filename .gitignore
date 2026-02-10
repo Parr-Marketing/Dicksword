@@ -4,3 +4,8 @@ dicksword.db
 dicksword.db-wal
 dicksword.db-shm
 .env
+uploads/
+*.dmg
+*.exe
+*.zip
+*.AppImage
